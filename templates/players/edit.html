@@ -1,0 +1,198 @@
+{% extends 'base.html' %}
+{% block title %}Edit {{ player.name }} — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h5 class="mb-0 fw-bold">Edit Player</h5>
+  <a href="/players/{{ player.id }}" class="btn btn-outline-secondary btn-sm">← Cancel</a>
+</div>
+
+<form method="post" action="/players/{{ player.id }}/edit">
+<div class="row g-4">
+
+  <div class="col-lg-6">
+    <div class="card shadow-sm border-0">
+      <div class="card-header fw-semibold">Player Details</div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label fw-semibold">Full name <span class="text-danger">*</span></label>
+            <input type="text" name="name" class="form-control" value="{{ player.name }}" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Date of birth</label>
+            <input type="date" name="date_of_birth" class="form-control"
+                   value="{{ player.date_of_birth.isoformat() if player.date_of_birth else '' }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Active</label>
+            <div class="form-check mt-1">
+              <input class="form-check-input" type="checkbox" name="active" id="chkActive"
+                     {% if player.active %}checked{% endif %}>
+              <label class="form-check-label" for="chkActive">Player is active</label>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Usual session</label>
+            <select name="session_id" id="edit-session" class="form-select">
+              <option value="">— none —</option>
+              {% for s in sessions %}
+              <option value="{{ s.id }}" {% if player.default_session_id == s.id %}selected{% endif %}>
+                {{ s.display }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Group</label>
+            <select name="group_id" id="edit-group" class="form-select">
+              <option value="">— none —</option>
+              {% for g in groups %}
+              <option value="{{ g.id }}" {% if player.default_group_id == g.id %}selected{% endif %}>
+                {{ g.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">Notes</label>
+            <input type="text" name="notes" class="form-control" value="{{ player.notes or '' }}">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card shadow-sm border-0 mb-3">
+      <div class="card-header fw-semibold">Guardian / Contact</div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label fw-semibold">Name</label>
+            <input type="text" name="guardian_name" class="form-control"
+                   value="{{ player.guardian_name or '' }}" placeholder="Parent / guardian">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Phone</label>
+            <input type="tel" name="guardian_phone" class="form-control"
+                   value="{{ player.guardian_phone or '' }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Email</label>
+            <input type="email" name="guardian_email" class="form-control"
+                   value="{{ player.guardian_email or '' }}">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card shadow-sm border-0">
+      <div class="card-header fw-semibold">Siblings</div>
+      <div class="card-body">
+        <input type="text" id="sib-search" class="form-control form-control-sm mb-2"
+               placeholder="Type a name to add a sibling…" autocomplete="off">
+        <div id="sib-results" class="border rounded bg-white shadow-sm"
+             style="display:none;max-height:150px;overflow-y:auto;position:absolute;z-index:999;width:300px"></div>
+        <div id="sib-chips" class="d-flex flex-wrap gap-1">
+          {% for sib in player.siblings %}
+          <span class="badge bg-info text-dark d-flex align-items-center gap-1 sib-chip" data-id="{{ sib.id }}">
+            {{ sib.name }}
+            <button type="button" class="btn-close btn-close-sm" style="font-size:.5rem"></button>
+          </span>
+          <input type="hidden" name="sibling_ids" value="{{ sib.id }}">
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+    <a href="/players/{{ player.id }}" class="btn btn-outline-secondary ms-2">Cancel</a>
+  </div>
+
+</div>
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const currentSibIds = new Set({{ current_sib_ids | tojson }});
+
+// Cascade groups on session change
+document.getElementById('edit-session').addEventListener('change', function() {
+  const grp = document.getElementById('edit-group');
+  grp.innerHTML = '<option value="">— none —</option>';
+  if (!this.value) return;
+  fetch('/api/groups/' + this.value)
+    .then(r => r.json())
+    .then(gs => gs.forEach(g => {
+      grp.insertAdjacentHTML('beforeend',
+        `<option value="${g.id}" ${currentSibIds.has(g.id) ? 'selected' : ''}>${g.name}</option>`);
+    }));
+});
+
+// Sibling typeahead
+(function() {
+  const allPlayers = {{ all_players | map(attribute='id') | list | tojson }}.map((id, i) => ({
+    id, name: ({{ all_players | map(attribute='name') | list | tojson }})[i]
+  }));
+  const form    = document.querySelector('form');
+  const search  = document.getElementById('sib-search');
+  const results = document.getElementById('sib-results');
+  const chips   = document.getElementById('sib-chips');
+  let selected  = {};
+
+  // Pre-populate from existing siblings
+  chips.querySelectorAll('.sib-chip').forEach(chip => {
+    const id = chip.dataset.id;
+    selected[id] = chip.textContent.trim();
+    chip.querySelector('button').onclick = () => { delete selected[id]; chip.remove(); syncHiddens(); };
+  });
+
+  function syncHiddens() {
+    form.querySelectorAll('input[name="sibling_ids"]').forEach(el => el.remove());
+    Object.keys(selected).forEach(id => {
+      const h = document.createElement('input');
+      h.type = 'hidden'; h.name = 'sibling_ids'; h.value = id;
+      form.appendChild(h);
+    });
+  }
+
+  function addChip(id, name) {
+    selected[id] = name;
+    const chip = document.createElement('span');
+    chip.className = 'badge bg-info text-dark d-flex align-items-center gap-1';
+    chip.dataset.id = id;
+    chip.innerHTML = `${name} <button type="button" class="btn-close btn-close-sm" style="font-size:.5rem"></button>`;
+    chip.querySelector('button').onclick = () => { delete selected[id]; chip.remove(); syncHiddens(); };
+    chips.appendChild(chip);
+    syncHiddens();
+  }
+
+  search.addEventListener('input', function() {
+    const q = this.value.trim().toLowerCase();
+    results.innerHTML = '';
+    if (!q) { results.style.display = 'none'; return; }
+    const matches = allPlayers.filter(p => p.name.toLowerCase().includes(q) && !selected[p.id]).slice(0, 8);
+    if (!matches.length) { results.style.display = 'none'; return; }
+    matches.forEach(p => {
+      const item = document.createElement('div');
+      item.className = 'px-3 py-2 border-bottom'; item.style.cursor = 'pointer';
+      item.textContent = p.name;
+      item.addEventListener('mousedown', e => {
+        e.preventDefault(); addChip(p.id, p.name);
+        search.value = ''; results.style.display = 'none';
+      });
+      item.onmouseover = () => item.classList.add('bg-light');
+      item.onmouseout  = () => item.classList.remove('bg-light');
+      results.appendChild(item);
+    });
+    results.style.display = 'block';
+  });
+  search.addEventListener('blur', () => setTimeout(() => results.style.display = 'none', 150));
+})();
+</script>
+{% endblock %}

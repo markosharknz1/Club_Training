@@ -1,0 +1,43 @@
+{% set available = all_templates | rejectattr('id', 'in', used_ids) | list %}
+{% if available %}
+<form method="post" action="/day/{{ d.isoformat() }}/setup">
+  {% for s in available %}
+  <div class="mb-3">
+    <div class="form-check">
+      <input class="form-check-input session-check" type="checkbox"
+             name="session_ids" value="{{ s.id }}" id="sess{{ s.id }}"
+             {% if s.day_of_week == d.weekday() %}checked{% endif %}
+             onchange="toggleGroups({{ s.id }}, this.checked)">
+      <label class="form-check-label fw-semibold" for="sess{{ s.id }}">
+        {{ s.name }}
+        <span class="text-muted fw-normal small ms-1">{{ s.day_name }} {{ s.start_time }}–{{ s.end_time }}</span>
+        {% if s.day_of_week == d.weekday() %}
+        <span class="badge bg-info text-dark ms-1" style="font-size:.65rem">Usual day</span>
+        {% endif %}
+      </label>
+    </div>
+
+    {% if s.active_groups %}
+    <div class="ms-4 mt-1" id="groups-{{ s.id }}"
+         {% if s.day_of_week != d.weekday() %}style="display:none"{% endif %}>
+      <div class="text-muted small mb-1">Groups running today:</div>
+      <div class="d-flex flex-wrap gap-3">
+        {% for g in s.active_groups %}
+        <div class="form-check form-check-inline mb-0">
+          <input class="form-check-input" type="checkbox"
+                 name="groups_{{ s.id }}" value="{{ g.id }}"
+                 id="grp{{ g.id }}" checked>
+          <label class="form-check-label small" for="grp{{ g.id }}">{{ g.name }}</label>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <button type="submit" class="btn btn-primary mt-1">Open Selected Sessions →</button>
+</form>
+{% else %}
+<p class="text-muted small mb-0">All available sessions are already open for this day.</p>
+{% endif %}

@@ -1,0 +1,119 @@
+{% extends 'base.html' %}
+{% block title %}{{ player.name }} — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h5 class="mb-0 fw-bold">{{ player.name }}
+    {% if not player.active %}<span class="badge bg-secondary ms-2">Inactive</span>{% endif %}
+  </h5>
+  <div class="d-flex gap-2">
+    <a href="/players/{{ player.id }}/edit" class="btn btn-outline-secondary btn-sm">Edit</a>
+    <a href="/players" class="btn btn-outline-secondary btn-sm">← Back</a>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-5">
+    <div class="card shadow-sm border-0 h-100">
+      <div class="card-header fw-semibold">Player Details</div>
+      <div class="card-body">
+        <dl class="row mb-0 small">
+          <dt class="col-5 text-muted">Date of birth</dt>
+          <dd class="col-7">
+            {{ player.date_of_birth.strftime('%d %b %Y') if player.date_of_birth else '—' }}
+            {% if player.age %}<span class="text-muted">(age {{ player.age }})</span>{% endif %}
+          </dd>
+          <dt class="col-5 text-muted">Session</dt>
+          <dd class="col-7">{{ player.default_session.name if player.default_session else '—' }}</dd>
+          <dt class="col-5 text-muted">Group</dt>
+          <dd class="col-7">{{ player.default_group.name if player.default_group else '—' }}</dd>
+          <dt class="col-5 text-muted">Total attended</dt>
+          <dd class="col-7">{{ player.total_attended }} sessions</dd>
+          {% if player.notes %}
+          <dt class="col-5 text-muted">Notes</dt>
+          <dd class="col-7">{{ player.notes }}</dd>
+          {% endif %}
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card shadow-sm border-0 h-100">
+      <div class="card-header fw-semibold">Guardian / Contact</div>
+      <div class="card-body">
+        <dl class="row mb-0 small">
+          <dt class="col-5 text-muted">Name</dt>
+          <dd class="col-7">{{ player.guardian_name  or '—' }}</dd>
+          <dt class="col-5 text-muted">Phone</dt>
+          <dd class="col-7">
+            {% if player.guardian_phone %}
+              <a href="tel:{{ player.guardian_phone }}">{{ player.guardian_phone }}</a>
+            {% else %}—{% endif %}
+          </dd>
+          <dt class="col-5 text-muted">Email</dt>
+          <dd class="col-7">
+            {% if player.guardian_email %}
+              <a href="mailto:{{ player.guardian_email }}">{{ player.guardian_email }}</a>
+            {% else %}—{% endif %}
+          </dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  {% if player.siblings %}
+  <div class="col-md-3">
+    <div class="card shadow-sm border-0 h-100">
+      <div class="card-header fw-semibold">Siblings</div>
+      <div class="card-body">
+        <ul class="list-unstyled mb-0 small">
+          {% for sib in player.siblings %}
+          <li><a href="/players/{{ sib.id }}">{{ sib.name }}</a>
+            {% if sib.age %}<span class="text-muted">({{ sib.age }})</span>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{# Attendance history #}
+{% if recent %}
+<h6 class="text-muted text-uppercase fw-bold mb-2" style="font-size:.7rem;letter-spacing:.08em">Attendance History</h6>
+<div class="card shadow-sm border-0">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0" style="font-size:.88rem">
+      <thead class="table-dark">
+        <tr>
+          <th>Date</th><th>Session</th><th>Group</th>
+          <th>Payment</th><th class="text-end">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in recent %}
+        <tr>
+          <td class="text-nowrap">{{ a.session_date.date.strftime('%a %d %b %Y') }}</td>
+          <td>{{ a.session_date.template.name }}</td>
+          <td>{{ a.group.name if a.group else '—' }}</td>
+          <td>
+            <span class="badge bg-{{ PAYMENT_COLORS.get(a.payment_type, 'secondary') }}">
+              {{ a.payment_type }}
+            </span>
+          </td>
+          <td class="text-end">
+            {% if a.payment_type in ['Cash','Card'] %}{{ '%.2f' % (a.amount|float) }}{% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<p class="text-muted small">No attendance records yet.</p>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,154 @@
+{% extends 'base.html' %}
+{% block title %}Select Players — {{ tmpl.name }} — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h5 class="mb-0 fw-bold">{{ tmpl.name }}</h5>
+    <div class="text-muted small">
+      {{ sd.date.strftime('%A, %d %B %Y') }} · {{ tmpl.start_time }}–{{ tmpl.end_time }}
+      &nbsp;·&nbsp; Who's here today?
+    </div>
+  </div>
+  <a href="/day/{{ sd.date.isoformat() }}" class="btn btn-outline-secondary btn-sm">← Day</a>
+</div>
+
+{# Quick actions bar #}
+<div class="d-flex gap-2 align-items-center mb-3 flex-wrap">
+  <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setAll(true)">Select all</button>
+  <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setAll(false)">Clear all</button>
+  <span class="text-muted small ms-1" id="sel-count">
+    {{ attending_ids | length }} selected
+  </span>
+  <input type="text" id="player-filter" class="form-control form-control-sm ms-auto"
+         placeholder="Filter by name…" style="max-width:200px"
+         oninput="filterPlayers(this.value)">
+</div>
+
+<form method="post" action="/register/{{ sd.id }}/select" id="sel-form">
+
+  {# ── Session regulars ─────────────────────────────────────────────── #}
+  {% if regulars %}
+  <div class="card shadow-sm border-0 mb-3">
+    <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+      <span>{{ tmpl.name }} — Registered Players</span>
+      <span class="badge bg-secondary">{{ regulars | length }}</span>
+    </div>
+
+    {# Group by default group #}
+    {% set ns = namespace(cur_group=None) %}
+    {% for p in regulars | sort(attribute='default_group.name') %}
+      {% set gname = p.default_group.name if p.default_group else 'No group' %}
+      {% if gname != ns.cur_group %}
+        {% set ns.cur_group = gname %}
+        <div class="section-header px-3">{{ gname }}</div>
+      {% endif %}
+
+      {% set checked = p.id in attending_ids %}
+      <label class="player-row list-group-item list-group-item-action d-flex align-items-center gap-3 py-2 px-3
+                    border-0 border-bottom {{ 'list-group-item-success' if checked }}"
+             for="p{{ p.id }}"
+             data-name="{{ p.name | lower }}">
+        <input class="form-check-input player-check mt-0 flex-shrink-0"
+               type="checkbox" name="player_ids" value="{{ p.id }}"
+               id="p{{ p.id }}" {{ 'checked' if checked }}
+               onchange="updateCount()">
+        <div class="flex-grow-1">
+          <span class="fw-semibold">{{ p.name }}</span>
+          {% if p.age %}<span class="text-muted small ms-1">{{ p.age }}</span>{% endif %}
+          {% if p.siblings %}<span class="badge bg-info text-dark ms-1" style="font-size:.6rem">siblings</span>{% endif %}
+        </div>
+        {% if p.guardian_phone %}
+        <span class="text-muted small d-none d-sm-inline">{{ p.guardian_phone }}</span>
+        {% endif %}
+        {% if p.default_group %}
+        <span class="badge bg-light text-dark border" style="font-size:.65rem">{{ p.default_group.name }}</span>
+        {% endif %}
+      </label>
+    {% else %}
+      <div class="p-3 text-muted small fst-italic">
+        No players assigned to this session yet.
+        <a href="/players">Add players →</a>
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# ── Other / walk-in players ──────────────────────────────────────── #}
+  {% if others %}
+  <details class="mb-4" {% if attending_ids and (others | selectattr('id', 'in', attending_ids) | list) %}open{% endif %}>
+    <summary class="btn btn-outline-secondary btn-sm mb-2" style="list-style:none;cursor:pointer">
+      + Other players ({{ others | length }})
+    </summary>
+    <div class="card shadow-sm border-0">
+      <div class="card-header fw-semibold text-muted small">Walk-ins / Other Sessions</div>
+      {% for p in others %}
+      {% set checked = p.id in attending_ids %}
+      <label class="player-row list-group-item list-group-item-action d-flex align-items-center gap-3 py-2 px-3
+                    border-0 border-bottom {{ 'list-group-item-success' if checked }}"
+             for="p{{ p.id }}"
+             data-name="{{ p.name | lower }}">
+        <input class="form-check-input player-check mt-0 flex-shrink-0"
+               type="checkbox" name="player_ids" value="{{ p.id }}"
+               id="p{{ p.id }}" {{ 'checked' if checked }}
+               onchange="updateCount()">
+        <div class="flex-grow-1">
+          <span class="fw-semibold">{{ p.name }}</span>
+          {% if p.age %}<span class="text-muted small ms-1">{{ p.age }}</span>{% endif %}
+        </div>
+        {% if p.default_session %}
+        <span class="text-muted small">{{ p.default_session.name }}</span>
+        {% endif %}
+        {% if p.guardian_phone %}
+        <span class="text-muted small d-none d-sm-inline">{{ p.guardian_phone }}</span>
+        {% endif %}
+      </label>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
+  {# ── Sticky confirm bar ───────────────────────────────────────────── #}
+  <div class="sticky-bottom py-3 px-1" style="background:rgba(244,246,249,.95);border-top:1px solid #dee2e6">
+    <div class="d-flex gap-3 align-items-center flex-wrap">
+      <button type="submit" class="btn btn-primary btn-lg px-5">
+        Confirm &amp; Open Register →
+      </button>
+      <span class="text-muted" id="sel-count-bottom">{{ attending_ids | length }} selected</span>
+      {% if sd.total_attending %}
+      <a href="/register/{{ sd.id }}" class="btn btn-outline-secondary ms-auto">
+        Skip to Register
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function updateCount() {
+  const n = document.querySelectorAll('.player-check:checked').length;
+  const txt = n + ' selected';
+  document.getElementById('sel-count').textContent = txt;
+  document.getElementById('sel-count-bottom').textContent = txt;
+  // Highlight row
+  document.querySelectorAll('.player-check').forEach(cb => {
+    cb.closest('label').classList.toggle('list-group-item-success', cb.checked);
+  });
+}
+
+function setAll(checked) {
+  document.querySelectorAll('.player-check:not(:disabled)').forEach(cb => cb.checked = checked);
+  updateCount();
+}
+
+function filterPlayers(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('.player-row').forEach(row => {
+    row.style.display = row.dataset.name.includes(q) ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}

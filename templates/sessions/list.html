@@ -1,0 +1,228 @@
+{% extends 'base.html' %}
+{% block title %}Training Sessions — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h5 class="mb-0 fw-bold">Training Sessions</h5>
+  <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addSessionModal">+ Add Session</button>
+</div>
+
+{% if not sessions %}
+<div class="alert alert-info">
+  No sessions yet. Click <strong>+ Add Session</strong> to create your first training session.
+</div>
+{% endif %}
+
+<div class="row g-3">
+{% for s in sessions %}
+<div class="col-lg-6">
+  <div class="card shadow-sm border-0">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-bold">{{ s.name }}</span>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary btn-sm"
+                data-bs-toggle="modal" data-bs-target="#editModal{{ s.id }}">Edit</button>
+        <form method="post" action="/sessions" class="d-inline"
+              onsubmit="return confirm('Remove this session? Players assigned to it will lose their session assignment.')">
+          <input type="hidden" name="action" value="deactivate">
+          <input type="hidden" name="session_id" value="{{ s.id }}">
+          <button class="btn btn-outline-danger btn-sm">Remove</button>
+        </form>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="row g-2 mb-3">
+        <div class="col-6">
+          <div class="text-muted small">Day &amp; time</div>
+          <div class="fw-semibold">{{ s.day_name }} {{ s.start_time }}–{{ s.end_time }}</div>
+        </div>
+        <div class="col-3">
+          <div class="text-muted small">Cash price</div>
+          <div class="fw-semibold">{{ s.price_cash | float | round | int }}</div>
+        </div>
+        <div class="col-3">
+          <div class="text-muted small">Card price</div>
+          <div class="fw-semibold">{{ s.price_card | float | round | int }}</div>
+        </div>
+      </div>
+
+      {# Groups #}
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <span class="text-muted small fw-semibold text-uppercase" style="font-size:.68rem;letter-spacing:.06em">Groups</span>
+        <button class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size:.75rem"
+                data-bs-toggle="modal" data-bs-target="#groupsModal{{ s.id }}">Edit groups</button>
+      </div>
+      {% if s.groups %}
+      <div class="d-flex flex-wrap gap-1">
+        {% for g in s.groups %}
+        <span class="badge bg-light text-dark border">{{ g.name }}</span>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="text-muted small fst-italic">No groups defined.</div>
+      {% endif %}
+
+      <div class="text-muted small mt-2">
+        {{ s.dates | length }} occurrence{{ 's' if s.dates|length != 1 }} recorded
+        &nbsp;·&nbsp;
+        {{ s.groups | selectattr('active') | list | length }} group{{ 's' if (s.groups|selectattr('active')|list|length) != 1 }}
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Edit session modal #}
+<div class="modal fade" id="editModal{{ s.id }}" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="/sessions">
+        <input type="hidden" name="action" value="edit">
+        <input type="hidden" name="session_id" value="{{ s.id }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Session</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label fw-semibold">Session name</label>
+              <input type="text" name="name" class="form-control" value="{{ s.name }}" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Day</label>
+              <select name="day_of_week" class="form-select">
+                {% for dn in day_names %}
+                <option value="{{ loop.index0 }}" {% if s.day_of_week == loop.index0 %}selected{% endif %}>{{ dn }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Start time</label>
+              <input type="time" name="start_time" class="form-control" value="{{ s.start_time }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">End time</label>
+              <input type="time" name="end_time" class="form-control" value="{{ s.end_time }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Cash price (per player)</label>
+              <input type="number" name="price_cash" class="form-control" step="1" min="0"
+                     value="{{ s.price_cash | float | round | int }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Card price (per player)</label>
+              <input type="number" name="price_card" class="form-control" step="1" min="0"
+                     value="{{ s.price_card | float | round | int }}">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{# Edit groups modal #}
+<div class="modal fade" id="groupsModal{{ s.id }}" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="/sessions">
+        <input type="hidden" name="action" value="save_groups">
+        <input type="hidden" name="session_id" value="{{ s.id }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Groups — {{ s.name }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small">One group per line. Order top-to-bottom is the display order.</p>
+          <div id="groups-list-{{ s.id }}">
+            {% for g in s.groups %}
+            <div class="input-group mb-2">
+              <input type="text" name="group_name" class="form-control" value="{{ g.name }}" placeholder="Group name">
+              <button type="button" class="btn btn-outline-danger" onclick="this.closest('.input-group').remove()">×</button>
+            </div>
+            {% endfor %}
+          </div>
+          <button type="button" class="btn btn-outline-secondary btn-sm mt-1"
+                  onclick="addGroupRow('groups-list-{{ s.id }}')">+ Add group</button>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Groups</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endfor %}
+</div>
+
+{# Add session modal #}
+<div class="modal fade" id="addSessionModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="/sessions">
+        <input type="hidden" name="action" value="add">
+        <div class="modal-header bg-success text-white">
+          <h5 class="modal-title">Add Training Session</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label fw-semibold">Session name <span class="text-danger">*</span></label>
+              <input type="text" name="name" class="form-control" required placeholder="e.g. Tuesday Juniors">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Day</label>
+              <select name="day_of_week" class="form-select">
+                {% for dn in day_names %}
+                <option value="{{ loop.index0 }}">{{ dn }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Start time</label>
+              <input type="time" name="start_time" class="form-control" value="18:00">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">End time</label>
+              <input type="time" name="end_time" class="form-control" value="20:00">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Cash price</label>
+              <input type="number" name="price_cash" class="form-control" step="1" min="0" value="0.00">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Card price</label>
+              <input type="number" name="price_card" class="form-control" step="1" min="0" value="0.00">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success">Add Session</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function addGroupRow(containerId) {
+  const div = document.createElement('div');
+  div.className = 'input-group mb-2';
+  div.innerHTML = `<input type="text" name="group_name" class="form-control" placeholder="Group name">
+    <button type="button" class="btn btn-outline-danger" onclick="this.closest('.input-group').remove()">×</button>`;
+  document.getElementById(containerId).appendChild(div);
+  div.querySelector('input').focus();
+}
+</script>
+{% endblock %}

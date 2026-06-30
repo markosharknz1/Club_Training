@@ -1,0 +1,183 @@
+{% extends 'base.html' %}
+{% block title %}Session Summary — {{ sd.template.name }} — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h5 class="mb-0 fw-bold">{{ sd.template.name }}</h5>
+    <div class="text-muted small">
+      {{ sd.date.strftime('%A, %d %B %Y') }}
+      · {{ sd.template.start_time }}–{{ sd.template.end_time }}
+      <span class="badge bg-secondary ms-1">Closed</span>
+    </div>
+  </div>
+  <div class="d-flex gap-2">
+    <form method="post" action="/register/{{ sd.id }}/reopen" class="d-inline">
+      <button class="btn btn-outline-warning btn-sm">Reopen</button>
+    </form>
+    <form method="post" action="/register/{{ sd.id }}/delete" class="d-inline"
+          onsubmit="return confirm('Permanently delete this session record?')">
+      <button class="btn btn-outline-danger btn-sm">Delete</button>
+    </form>
+    <a href="/history" class="btn btn-outline-secondary btn-sm">← History</a>
+  </div>
+</div>
+
+{# Summary cards #}
+<div class="row g-3 mb-4">
+  <div class="col-sm-3">
+    <div class="card shadow-sm border-0 text-center">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold">{{ sd.total_attending }}</div>
+        <div class="text-muted small">Players</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-3">
+    <div class="card shadow-sm border-0 text-center">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-success">{{ sd.total_cash | round | int }}</div>
+        <div class="text-muted small">Cash</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-3">
+    <div class="card shadow-sm border-0 text-center">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-primary">{{ sd.total_card | round | int }}</div>
+        <div class="text-muted small">Card</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-3">
+    <div class="card shadow-sm border-0 text-center">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold">{{ (sd.total_cash + sd.total_card) | round | int }}</div>
+        <div class="text-muted small">Cash + Card</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  {# Payment breakdown #}
+  <div class="col-md-4">
+    <div class="card shadow-sm border-0 h-100">
+      <div class="card-header fw-semibold">Payment Breakdown</div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <tbody>
+            {% for pt in PAYMENT_TYPES %}
+            {% set cnt = sd.payment_summary.get(pt, 0) %}
+            {% if cnt %}
+            <tr>
+              <td><span class="badge bg-{{ PAYMENT_COLORS.get(pt,'secondary') }}">{{ pt }}</span></td>
+              <td class="fw-semibold">{{ cnt }}</td>
+              {% if pt in ['Cash','Card'] %}
+              <td class="text-end text-muted small">
+                {% set amt = sd.attendance | selectattr('payment_type','eq',pt) | map(attribute='amount') | map('float') | sum %}
+                {{ '%.2f' % amt }}
+              </td>
+              {% else %}
+              <td></td>
+              {% endif %}
+            </tr>
+            {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {# Group breakdown #}
+  <div class="col-md-4">
+    <div class="card shadow-sm border-0 h-100">
+      <div class="card-header fw-semibold">Group Breakdown</div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <tbody>
+            {% for g, cnt in sd.group_summary.items() %}
+            <tr>
+              <td>{{ g }}</td>
+              <td class="fw-semibold">{{ cnt }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="2" class="text-muted small fst-italic">No group data</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {# Coaches + notes #}
+  <div class="col-md-4">
+    <div class="card shadow-sm border-0 h-100">
+      <div class="card-header fw-semibold">Coaches</div>
+      <div class="card-body">
+        {% if sd.coaches %}
+        <ul class="list-unstyled mb-0 small">
+          {% for c in sd.coaches %}
+          <li>{{ c.name }}</li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted small mb-0">None recorded.</p>
+        {% endif %}
+        {% if sd.notes %}
+        <hr class="my-2">
+        <div class="small text-muted fw-semibold mb-1">Notes</div>
+        <div class="small">{{ sd.notes }}</div>
+        {% endif %}
+        {% if sd.closed_at %}
+        <hr class="my-2">
+        <div class="text-muted" style="font-size:.75rem">
+          Closed {{ sd.closed_at.strftime('%H:%M') }}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Attendance list #}
+<h6 class="text-muted text-uppercase fw-bold mb-2" style="font-size:.7rem;letter-spacing:.08em">
+  Attendance ({{ sd.total_attending }})
+</h6>
+<div class="card shadow-sm border-0">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0" style="font-size:.88rem">
+      <thead class="table-dark">
+        <tr>
+          <th>Player</th>
+          <th>Group</th>
+          <th>Payment</th>
+          <th class="text-end">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in sd.attendance | sort(attribute='player.name') %}
+        <tr>
+          <td>
+            <a href="/players/{{ a.player.id }}" class="text-decoration-none">{{ a.player.name }}</a>
+          </td>
+          <td class="text-muted small">{{ a.group.name if a.group else '—' }}</td>
+          <td>
+            <span class="badge bg-{{ PAYMENT_COLORS.get(a.payment_type,'secondary') }}">
+              {{ a.payment_type }}
+            </span>
+          </td>
+          <td class="text-end">
+            {% if a.payment_type in ['Cash','Card'] %}{{ a.amount | float | round | int }}{% else %}—{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="text-center text-muted py-4">No attendance recorded.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

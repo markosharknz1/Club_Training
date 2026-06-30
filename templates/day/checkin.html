@@ -1,0 +1,395 @@
+{% extends 'base.html' %}
+{% block title %}Check In — {{ d.strftime('%a %d %b') }} — {{ club_name }}{% endblock %}
+{% block content %}
+
+{# ── Header ───────────────────────────────────────────────────────── #}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h5 class="mb-0 fw-bold">Check In Players</h5>
+    <div class="text-muted small">{{ d.strftime('%A, %d %B %Y') }}</div>
+  </div>
+  <a href="/day/{{ d.isoformat() }}" class="btn btn-outline-secondary btn-sm">← Day</a>
+</div>
+
+{# ── Open sessions summary ────────────────────────────────────────── #}
+{% if session_dates %}
+<div class="d-flex flex-wrap gap-2 mb-3">
+  {% for sd in session_dates %}
+  <div class="badge bg-light text-dark border px-3 py-2" style="font-size:.8rem">
+    <span class="fw-semibold">{{ sd.template.name }}</span>
+    <span class="badge bg-success ms-1" data-sd-badge="{{ sd.id }}">{{ sd.total_attending }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-warning">No open sessions for this day. <a href="/day/{{ d.isoformat() }}/plan">Plan the day first →</a></div>
+{% endif %}
+
+{# ── Search + stats ───────────────────────────────────────────────── #}
+<div class="d-flex gap-2 align-items-center mb-3 flex-wrap">
+  <input type="text" id="player-search" class="form-control"
+         placeholder="Search by name…" style="max-width:260px" autocomplete="off"
+         oninput="filterPlayers(this.value)">
+  <span class="text-muted small ms-2" id="checked-count">
+    {{ attendance_map | length }} checked in of {{ all_players | length }}
+  </span>
+</div>
+
+{# ── Player list ──────────────────────────────────────────────────── #}
+<div class="card shadow-sm border-0">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0" id="player-table" style="font-size:.9rem">
+      <thead class="table-dark">
+        <tr>
+          <th>Player</th>
+          <th class="d-none d-md-table-cell">Age</th>
+          <th class="d-none d-sm-table-cell">Guardian phone</th>
+          <th>Session / Group</th>
+          <th style="width:110px">Payment</th>
+          <th style="width:70px"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in all_players %}
+        {% set info = attendance_map.get(p.id) %}
+        <tr class="player-row {% if info %}table-success{% endif %}"
+            data-name="{{ p.name | lower }}"
+            data-player-id="{{ p.id }}">
+          <td>
+            <div class="fw-semibold">{{ p.name }}</div>
+            {% if p.siblings %}
+            <span class="badge bg-info text-dark" style="font-size:.6rem">siblings</span>
+            {% endif %}
+          </td>
+          <td class="text-muted d-none d-md-table-cell">{{ p.age if p.age is not none else '—' }}</td>
+          <td class="text-muted small d-none d-sm-table-cell">{{ p.guardian_phone or '—' }}</td>
+          <td>
+            {% if info %}
+            <div class="fw-semibold" style="font-size:.82rem">{{ info.session_name }}</div>
+            {% if info.group_name %}<div class="text-muted" style="font-size:.75rem">{{ info.group_name }}</div>{% endif %}
+            {% else %}
+            <span class="text-muted small fst-italic">not checked in</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if info %}
+            <span class="badge bg-{{ PAYMENT_COLORS.get(info.payment_type,'secondary') }}">
+              {{ info.payment_type }}
+              {% if info.payment_type in ['Cash','Card'] and info.amount %}· {{ info.amount | int }}{% endif %}
+            </span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <button type="button"
+                    class="btn btn-sm py-0 px-2 {% if info %}btn-success{% else %}btn-outline-primary{% endif %}"
+                    onclick="openCheckin(
+                      {{ p.id }},
+                      {{ p.name | tojson }},
+                      {{ info.sd_id if info else 'null' }},
+                      {{ info.group_id if info else 'null' }},
+                      {{ info.payment_type | tojson if info else 'null' }},
+                      {{ info.amount | int if info else 0 }}
+                    )">
+              {% if info %}✎{% else %}Check in{% endif %}
+            </button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted py-4">No active players in the database.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# ══ Check-in modal ═══════════════════════════════════════════════════ #}
+<div class="modal fade" id="checkinModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Check in: <span id="modal-name"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="modal-player-id">
+        <input type="hidden" id="modal-current-sd-id">
+
+        {# Session selector #}
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Session <span class="text-danger">*</span></label>
+          <div id="session-btns" class="d-flex flex-column gap-2">
+            {% for sd in session_dates %}
+            <button type="button"
+                    class="btn btn-outline-secondary text-start session-btn"
+                    data-sd-id="{{ sd.id }}"
+                    data-price-cash="{{ sd.template.price_cash | float | round | int }}"
+                    data-price-card="{{ sd.template.price_card | float | round | int }}"
+                    onclick="selectSession({{ sd.id }})">
+              <span class="fw-semibold">{{ sd.template.name }}</span>
+              <span class="text-muted ms-2 small">{{ sd.template.start_time }}–{{ sd.template.end_time }}</span>
+            </button>
+            {% endfor %}
+          </div>
+        </div>
+
+        {# Group selector #}
+        <div class="mb-3" id="group-row">
+          <label class="form-label fw-semibold">Group</label>
+          <select id="modal-group" class="form-select">
+            <option value="">— no group —</option>
+          </select>
+        </div>
+
+        {# Payment type #}
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Payment</label>
+          <div class="d-flex flex-wrap gap-2" id="pay-btns">
+            {% for pt in PAYMENT_TYPES %}
+            <button type="button" class="btn btn-outline-secondary pay-btn"
+                    data-type="{{ pt }}" onclick="selectPayType('{{ pt }}')">
+              {{ pt }}
+            </button>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="mb-3" id="amount-row" style="display:none">
+          <label class="form-label fw-semibold">Amount</label>
+          <input type="number" id="modal-amount" class="form-control" step="1" min="0" value="0">
+        </div>
+
+        <div id="modal-error" class="alert alert-danger d-none small"></div>
+      </div>
+      <div class="modal-footer d-flex justify-content-between">
+        <button type="button" class="btn btn-outline-danger" id="remove-btn"
+                style="display:none!important" onclick="removeCheckin()">
+          Remove
+        </button>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="confirmCheckin()">Confirm</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SESSIONS    = {{ sessions_js | safe }};
+const AMOUNT_TYPES = new Set({{ AMOUNT_TYPES | tojson }});
+const PAY_COLORS  = {{ PAYMENT_COLORS | tojson }};
+
+let selectedSdId  = null;
+let selectedPayType = null;
+let currentPlayerId = null;
+let isCheckedIn   = false;
+
+// ── Open check-in modal ─────────────────────────────────────────────
+function openCheckin(pid, name, currentSdId, currentGroupId, currentPayType, currentAmount) {
+  currentPlayerId = pid;
+  isCheckedIn = currentSdId !== null;
+  document.getElementById('modal-player-id').value    = pid;
+  document.getElementById('modal-current-sd-id').value = currentSdId || '';
+  document.getElementById('modal-name').textContent   = name;
+  document.getElementById('modal-error').classList.add('d-none');
+
+  // Pre-select session
+  selectedSdId = currentSdId;
+  document.querySelectorAll('.session-btn').forEach(btn => {
+    const active = parseInt(btn.dataset.sdId) === currentSdId;
+    btn.className = 'btn text-start session-btn ' + (active ? 'btn-primary' : 'btn-outline-secondary');
+  });
+
+  // Populate groups for current session
+  populateGroups(currentSdId, currentGroupId);
+
+  // Pre-select payment
+  const payType = currentPayType || 'Cash';
+  selectPayType(payType, currentAmount || getDefaultAmount(currentSdId, payType));
+
+  // Remove button
+  document.getElementById('remove-btn').style.setProperty(
+    'display', isCheckedIn ? 'inline-block' : 'none', 'important'
+  );
+
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('checkinModal')).show();
+}
+
+// ── Select a session ────────────────────────────────────────────────
+function selectSession(sdId) {
+  selectedSdId = sdId;
+  document.querySelectorAll('.session-btn').forEach(btn => {
+    const active = parseInt(btn.dataset.sdId) === sdId;
+    btn.className = 'btn text-start session-btn ' + (active ? 'btn-primary' : 'btn-outline-secondary');
+  });
+  populateGroups(sdId, null);
+  // Update amount default for selected session
+  if (selectedPayType) selectPayType(selectedPayType);
+}
+
+function populateGroups(sdId, selectedGroupId) {
+  const grp = document.getElementById('modal-group');
+  grp.innerHTML = '<option value="">— no group —</option>';
+  const sess = SESSIONS.find(s => s.sd_id === sdId);
+  if (sess) {
+    sess.groups.forEach(g => {
+      const opt = document.createElement('option');
+      opt.value = g.id; opt.textContent = g.name;
+      if (g.id === selectedGroupId) opt.selected = true;
+      grp.appendChild(opt);
+    });
+  }
+}
+
+function getDefaultAmount(sdId, payType) {
+  const sess = SESSIONS.find(s => s.sd_id === sdId);
+  if (!sess) return 0;
+  return payType === 'Card' ? sess.price_card : sess.price_cash;
+}
+
+// ── Select payment type ─────────────────────────────────────────────
+function selectPayType(type, amount) {
+  selectedPayType = type;
+  document.querySelectorAll('.pay-btn').forEach(btn => {
+    const t = btn.dataset.type;
+    btn.className = 'btn pay-btn ' + (t === type ? 'pay-' + t.replace(' ', '-') : 'btn-outline-secondary');
+  });
+  const amtRow = document.getElementById('amount-row');
+  const amtInp = document.getElementById('modal-amount');
+  if (AMOUNT_TYPES.has(type)) {
+    amtRow.style.display = '';
+    amtInp.value = amount !== undefined ? Math.round(amount) : Math.round(getDefaultAmount(selectedSdId, type));
+  } else {
+    amtRow.style.display = 'none';
+    amtInp.value = 0;
+  }
+}
+
+// ── Confirm check-in ────────────────────────────────────────────────
+function confirmCheckin() {
+  if (!selectedSdId) {
+    showError('Please select a session.');
+    return;
+  }
+  if (!selectedPayType) {
+    showError('Please select a payment type.');
+    return;
+  }
+  const playerId  = currentPlayerId;
+  const groupId   = document.getElementById('modal-group').value || null;
+  const amount    = parseFloat(document.getElementById('modal-amount').value) || 0;
+  const prevSdId  = parseInt(document.getElementById('modal-current-sd-id').value) || null;
+
+  // If player was in a different session, remove from the old one first
+  const doCheckin = () => fetch('/register/' + selectedSdId + '/checkin', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({player_id: playerId, payment_type: selectedPayType, amount, group_id: groupId}),
+  }).then(r => r.json()).then(data => {
+    if (!data.ok) { showError(data.error); return; }
+    bootstrap.Modal.getInstance(document.getElementById('checkinModal')).hide();
+    updateRow(playerId, selectedSdId, groupId, selectedPayType, amount);
+    updateSessionBadges(data.totals, selectedSdId);
+  });
+
+  if (prevSdId && prevSdId !== selectedSdId) {
+    fetch('/register/' + prevSdId + '/undo', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({player_id: playerId}),
+    }).then(r => r.json()).then(d => {
+      if (d.ok) updateSessionBadges(d.totals, prevSdId);
+      doCheckin();
+    });
+  } else {
+    doCheckin();
+  }
+}
+
+// ── Remove check-in ─────────────────────────────────────────────────
+function removeCheckin() {
+  if (!confirm('Remove this check-in?')) return;
+  const sdId = parseInt(document.getElementById('modal-current-sd-id').value);
+  fetch('/register/' + sdId + '/undo', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({player_id: currentPlayerId}),
+  }).then(r => r.json()).then(data => {
+    if (!data.ok) return;
+    bootstrap.Modal.getInstance(document.getElementById('checkinModal')).hide();
+    clearRow(currentPlayerId);
+    updateSessionBadges(data.totals, sdId);
+  });
+}
+
+// ── DOM helpers ─────────────────────────────────────────────────────
+function updateRow(pid, sdId, groupId, payType, amount) {
+  const row = document.querySelector(`tr[data-player-id="${pid}"]`);
+  if (!row) return;
+  row.classList.add('table-success');
+
+  const sess  = SESSIONS.find(s => s.sd_id === sdId);
+  const grp   = sess ? sess.groups.find(g => g.id === parseInt(groupId)) : null;
+  const cells = row.cells;
+
+  cells[3].innerHTML = `<div class="fw-semibold" style="font-size:.82rem">${sess ? sess.name : ''}</div>` +
+    (grp ? `<div class="text-muted" style="font-size:.75rem">${grp.name}</div>` : '');
+
+  const amtStr = AMOUNT_TYPES.has(payType) && amount ? ` · ${Math.round(amount)}` : '';
+  cells[4].innerHTML = `<span class="badge bg-${PAY_COLORS[payType] || 'secondary'}">${payType}${amtStr}</span>`;
+
+  const btn = cells[5].querySelector('button');
+  btn.className = 'btn btn-success btn-sm py-0 px-2';
+  btn.textContent = '✎';
+  btn.onclick = () => openCheckin(pid, row.cells[0].querySelector('.fw-semibold').textContent.trim(),
+    sdId, groupId ? parseInt(groupId) : null, payType, amount);
+
+  updateCheckedCount();
+}
+
+function clearRow(pid) {
+  const row = document.querySelector(`tr[data-player-id="${pid}"]`);
+  if (!row) return;
+  row.classList.remove('table-success');
+  row.cells[3].innerHTML = '<span class="text-muted small fst-italic">not checked in</span>';
+  row.cells[4].innerHTML = '';
+  const btn = row.cells[5].querySelector('button');
+  btn.className = 'btn btn-outline-primary btn-sm py-0 px-2';
+  btn.textContent = 'Check in';
+  btn.onclick = () => openCheckin(pid, row.cells[0].querySelector('.fw-semibold').textContent.trim(),
+    null, null, null, 0);
+  updateCheckedCount();
+}
+
+function updateSessionBadges(totals, sdId) {
+  // Update the session summary badges at the top
+  document.querySelectorAll('[data-sd-badge]').forEach(el => {
+    if (parseInt(el.dataset.sdBadge) === sdId) {
+      el.textContent = totals.total;
+    }
+  });
+}
+
+function updateCheckedCount() {
+  const checked = document.querySelectorAll('.player-row.table-success').length;
+  const total   = document.querySelectorAll('.player-row').length;
+  document.getElementById('checked-count').textContent = checked + ' checked in of ' + total;
+}
+
+function showError(msg) {
+  const el = document.getElementById('modal-error');
+  el.textContent = msg;
+  el.classList.remove('d-none');
+}
+
+function filterPlayers(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('.player-row').forEach(row => {
+    row.style.display = row.dataset.name.includes(q) ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}

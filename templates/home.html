@@ -1,0 +1,119 @@
+{% extends 'base.html' %}
+{% block title %}Home — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h5 class="mb-0 fw-bold">{{ today.strftime('%A, %d %B %Y') }}</h5>
+  <a href="/register" class="btn btn-primary btn-sm">+ Start Register</a>
+</div>
+
+{# Today's sessions #}
+{% if today_sessions %}
+<div class="row g-3 mb-4">
+  {% for ts in today_sessions %}
+  <div class="col-md-4 col-sm-6">
+    <div class="card shadow-sm border-0 h-100">
+      <div class="card-body">
+        <h6 class="fw-bold mb-1">{{ ts.tmpl.name }}</h6>
+        <div class="text-muted small mb-3">{{ ts.tmpl.start_time }}–{{ ts.tmpl.end_time }}</div>
+        {% if ts.sd %}
+          {% if ts.sd.status == 'open' %}
+            <div class="d-flex align-items-center gap-2 mb-3">
+              <span class="badge bg-success">Open</span>
+              <span class="text-muted small">{{ ts.sd.total_attending }} checked in</span>
+            </div>
+            <a href="/register/{{ ts.sd.id }}" class="btn btn-success btn-sm w-100">Open Register →</a>
+          {% else %}
+            <div class="d-flex align-items-center gap-2 mb-3">
+              <span class="badge bg-secondary">Closed</span>
+              <span class="text-muted small">{{ ts.sd.total_attending }} attended</span>
+            </div>
+            <a href="/register/{{ ts.sd.id }}/detail" class="btn btn-outline-secondary btn-sm w-100">View Summary</a>
+          {% endif %}
+        {% else %}
+          <form method="post" action="/register/start">
+            <input type="hidden" name="session_id" value="{{ ts.tmpl.id }}">
+            <input type="hidden" name="date" value="{{ today.isoformat() }}">
+            <button class="btn btn-primary btn-sm w-100">Start Register</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-light border mb-4">
+  No sessions scheduled for today.
+  {% if not total_players %}
+    Go to <a href="/sessions">⚙ Setup → Training Sessions</a> to add your first session.
+  {% endif %}
+</div>
+{% endif %}
+
+{# Stats + recent history #}
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card shadow-sm border-0 text-center">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-primary">{{ total_players }}</div>
+        <div class="text-muted small">Active players</div>
+      </div>
+    </div>
+  </div>
+  {% if recent %}
+  <div class="col-6 col-md-3">
+    <div class="card shadow-sm border-0 text-center">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-success">{{ recent[0].total_attending }}</div>
+        <div class="text-muted small">Last session</div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% if recent %}
+<h6 class="text-muted text-uppercase fw-bold" style="font-size:.7rem;letter-spacing:.08em">Recent Sessions</h6>
+<div class="card shadow-sm border-0">
+  <div class="table-responsive">
+    <table class="table table-hover table-sm align-middle mb-0" style="font-size:.88rem">
+      <thead class="table-dark">
+        <tr>
+          <th>Date</th><th>Session</th>
+          <th class="text-center">Players</th>
+          <th class="text-end">Cash</th>
+          <th class="text-end">Card</th>
+          <th class="text-end">Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sd in recent %}
+        <tr>
+          <td class="text-nowrap">{{ sd.date.strftime('%a %d %b') }}</td>
+          <td>{{ sd.template.name }}</td>
+          <td class="text-center">{{ sd.total_attending }}</td>
+          <td class="text-end">{{ '%.2f' % sd.total_cash }}</td>
+          <td class="text-end">{{ '%.2f' % sd.total_card }}</td>
+          <td class="text-end">
+            <span class="badge {{ 'bg-success' if sd.status=='open' else 'bg-secondary' }}">
+              {{ sd.status.title() }}
+            </span>
+          </td>
+          <td class="text-end">
+            {% if sd.status == 'open' %}
+              <a href="/register/{{ sd.id }}" class="btn btn-success btn-sm py-0 px-2">Register</a>
+            {% else %}
+              <a href="/register/{{ sd.id }}/detail" class="btn btn-outline-secondary btn-sm py-0 px-2">View</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

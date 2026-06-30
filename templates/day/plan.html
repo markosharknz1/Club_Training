@@ -1,0 +1,122 @@
+{% extends 'base.html' %}
+{% block title %}Plan {{ d.strftime('%a %d %b') }} — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h5 class="mb-0 fw-bold">
+      {% if is_today %}Today — {% endif %}{{ d.strftime('%A, %d %B %Y') }}
+    </h5>
+    <div class="text-muted small">Select which sessions run today and which groups are active.</div>
+  </div>
+  <a href="/day/{{ d.isoformat() }}" class="btn btn-outline-secondary btn-sm">← Back</a>
+</div>
+
+{% set available = all_templates | rejectattr('id', 'in', used_ids) | list %}
+{% set already_open = all_templates | selectattr('id', 'in', used_ids) | list %}
+
+{% if not all_templates %}
+<div class="alert alert-info">
+  No training sessions set up yet.
+  Go to <a href="/sessions">⚙ Setup → Training Sessions</a> to create your first session.
+</div>
+{% else %}
+
+<form method="post" action="/day/{{ d.isoformat() }}/setup">
+
+  {# ── Available sessions ─────────────────────────────────────────── #}
+  {% if available %}
+  <div class="mb-4">
+    {% for s in available %}
+    <div class="card shadow-sm border-0 mb-3" id="card-{{ s.id }}">
+      <div class="card-header">
+        <div class="form-check d-flex align-items-center gap-2 mb-0">
+          <input class="form-check-input mt-0" type="checkbox"
+                 name="session_ids" value="{{ s.id }}" id="sess{{ s.id }}"
+                 {% if s.day_of_week == d.weekday() %}checked{% endif %}
+                 onchange="toggleSession({{ s.id }}, this.checked)"
+                 style="width:1.2em;height:1.2em">
+          <label class="form-check-label fw-bold fs-6 mb-0" for="sess{{ s.id }}">
+            {{ s.name }}
+          </label>
+          <span class="text-muted fw-normal small">{{ s.day_name }} · {{ s.start_time }}–{{ s.end_time }}</span>
+          {% if s.price_cash or s.price_card %}
+          <span class="text-muted small">
+            · Cash {{ s.price_cash | int }} / Card {{ s.price_card | int }}
+          </span>
+          {% endif %}
+          {% if s.day_of_week == d.weekday() %}
+          <span class="badge bg-info text-dark" style="font-size:.65rem">Usual day</span>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if s.active_groups %}
+      <div class="card-body py-3" id="groups-{{ s.id }}"
+           {% if s.day_of_week != d.weekday() %}style="display:none"{% endif %}>
+        <div class="text-muted small fw-semibold mb-2 text-uppercase"
+             style="font-size:.7rem;letter-spacing:.06em">Groups running today</div>
+        <div class="row g-2">
+          {% for g in s.active_groups %}
+          <div class="col-auto">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox"
+                     name="groups_{{ s.id }}" value="{{ g.id }}"
+                     id="grp{{ g.id }}" checked>
+              <label class="form-check-label" for="grp{{ g.id }}">{{ g.name }}</label>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="form-text mt-1">Uncheck any groups not running today.</div>
+      </div>
+      {% else %}
+      <div class="card-body py-2" id="groups-{{ s.id }}"
+           {% if s.day_of_week != d.weekday() %}style="display:none"{% endif %}>
+        <span class="text-muted small fst-italic">No groups defined for this session.</span>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+
+    <button type="submit" class="btn btn-primary btn-lg px-4 mt-2">Open Selected Sessions →</button>
+  </div>
+  {% endif %}
+
+  {# ── Already open ───────────────────────────────────────────────── #}
+  {% if already_open %}
+  <div class="mt-2">
+    <div class="text-muted small fw-semibold text-uppercase mb-2"
+         style="font-size:.7rem;letter-spacing:.06em">Already Open Today</div>
+    {% for s in already_open %}
+    <div class="card shadow-sm border-0 mb-2 opacity-50">
+      <div class="card-header d-flex align-items-center gap-2">
+        <span class="badge bg-success">Open</span>
+        <span class="fw-semibold">{{ s.name }}</span>
+        <span class="text-muted small">{{ s.start_time }}–{{ s.end_time }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if not available %}
+  <div class="alert alert-success">
+    All sessions are already open for this day.
+    <a href="/day/{{ d.isoformat() }}" class="alert-link">Go to Day View →</a>
+  </div>
+  {% endif %}
+
+</form>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleSession(sid, checked) {
+  const body = document.getElementById('groups-' + sid);
+  if (body) body.style.display = checked ? '' : 'none';
+}
+</script>
+{% endblock %}

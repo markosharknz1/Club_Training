@@ -1,0 +1,214 @@
+from flask_sqlalchemy import SQLAlchemy
+from datetime import date as date_t, datetime
+
+db = SQLAlchemy()
+
+PAYMENT_TYPES  = ['Cash', 'Card', 'Voucher', 'Visit Pass', 'Free']
+AMOUNT_TYPES   = {'Cash', 'Card'}       # these record a dollar amount
+DAY_NAMES      = ['Monday', 'Tuesday', 'Wednesday', 'Thursday',
+                  'Friday', 'Saturday', 'Sunday']
+PAYMENT_COLORS = {
+    'Cash':       'success',
+    'Card':       'primary',
+    'Voucher':    'warning',
+    'Visit Pass': 'info',
+    'Free':       'secondary',
+}
+
+
+class Setting(db.Model):
+    __tablename__ = 'settings'
+    key   = db.Column(db.String(100), primary_key=True)
+    value = db.Column(db.Text)
+
+    @staticmethod
+    def get(key, default=''):
+        row = Setting.query.get(key)
+        return row.value if row else default
+
+    @staticmethod
+    def set(key, value):
+        row = Setting.query.get(key)
+        if row:
+            row.value = str(value)
+        else:
+            db.session.add(Setting(key=key, value=str(value)))
+        db.session.commit()
+
+
+class SessionTemplate(db.Model):
+    """A recurring training session definition (e.g. 'Tuesday Juniors 6–8 pm')."""
+    __tablename__ = 'session_templates'
+    id           = db.Column(db.Integer, primary_key=True)
+    name         = db.Column(db.String(100), nullable=False)
+    day_of_week  = db.Column(db.Integer, nullable=False)   # 0=Mon … 6=Sun
+    start_time   = db.Column(db.String(5),  nullable=False) # HH:MM
+    end_time     = db.Column(db.String(5),  nullable=False)
+    price_cash   = db.Column(db.Numeric(8, 2), default=0)
+    price_card   = db.Column(db.Numeric(8, 2), default=0)
+    active       = db.Column(db.Boolean, default=True, nullable=False)
+
+    groups = db.relationship('Group', backref='session', lazy=True,
+                              order_by='Group.sort_order',
+                              cascade='all, delete-orphan')
+    dates  = db.relationship('SessionDate', backref='template', lazy=True)
+
+    @property
+    def day_name(self):
+        return DAY_NAMES[self.day_of_week]
+
+    @property
+    def display(self):
+        return f'{self.name} ({self.day_name} {self.start_time}–{self.end_time})'
+
+    @property
+    def active_groups(self):
+        return [g for g in self.groups if g.active]
+
+
+class Group(db.Model):
+    __tablename__ = 'groups'
+    id         = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey('session_templates.id'), nullable=False)
+    name       = db.Column(db.String(100), nullable=False)
+    sort_order = db.Column(db.Integer, default=0)
+    active     = db.Column(db.Boolean, default=True, nullable=False)
+
+
+class Coach(db.Model):
+    __tablename__ = 'coaches'
+    id     = db.Column(db.Integer, primary_key=True)
+    name   = db.Column(db.String(150), nullable=False)
+    phone  = db.Column(db.String(30))
+    email  = db.Column(db.String(150))
+    active = db.Column(db.Boolean, default=True, nullable=False)
+
+
+sibling_links = db.Table('sibling_links',
+    db.Column('player_a_id', db.Integer, db.ForeignKey('players.id'), primary_key=True),
+    db.Column('player_b_id', db.Integer, db.ForeignKey('players.id'), primary_key=True),
+)
+
+
+class Player(db.Model):
+    __tablename__ = 'players'
+    id                 = db.Column(db.Integer, primary_key=True)
+    name               = db.Column(db.String(150), nullable=False)
+    date_of_birth      = db.Column(db.Date)
+    guardian_name      = db.Column(db.String(150))
+    guardian_phone     = db.Column(db.String(30))
+    guardian_email     = db.Column(db.String(150))
+    default_session_id = db.Column(db.Integer, db.ForeignKey('session_templates.id'))
+    default_group_id   = db.Column(db.Integer, db.ForeignKey('groups.id'))
+    active             = db.Column(db.Boolean, default=True, nullable=False)
+    notes              = db.Column(db.Text)
+    created_at         = db.Column(db.DateTime, default=datetime.utcnow)
+
+    default_session = db.relationship('SessionTemplate', foreign_keys=[default_session_id])
+    default_group   = db.relationship('Group',           foreign_keys=[default_group_id])
+    attendance_records = db.relationship('Attendance', backref='player', lazy=True,
+                                          cascade='all, delete-orphan')
+
+    siblings_a = db.relationship('Player', secondary=sibling_links,
+                                  primaryjoin=sibling_links.c.player_a_id == id,
+                                  secondaryjoin=sibling_links.c.player_b_id == id,
+                                  lazy='dynamic')
+    siblings_b = db.relationship('Player', secondary=sibling_links,
+                                  primaryjoin=sibling_links.c.player_b_id == id,
+                                  secondaryjoin=sibling_links.c.player_a_id == id,
+                                  lazy='dynamic', overlaps='siblings_a')
+
+    @property
+    def siblings(self):
+        return list(self.siblings_a) + list(self.siblings_b)
+
+    @property
+    def age(self):
+        if not self.date_of_birth:
+            return None
+        today = date_t.today()
+        return (today.year - self.date_of_birth.year
+                - ((today.month, today.day) < (self.date_of_birth.month,
+                                                self.date_of_birth.day)))
+
+    @property
+    def total_attended(self):
+        return sum(1 for a in self.attendance_records)
+
+
+_sd_coaches = db.Table('session_date_coaches',
+    db.Column('session_date_id', db.Integer, db.ForeignKey('session_dates.id'), primary_key=True),
+    db.Column('coach_id',        db.Integer, db.ForeignKey('coaches.id'),        primary_key=True),
+)
+
+
+class SessionDate(db.Model):
+    """A specific date on which a SessionTemplate was run."""
+    __tablename__ = 'session_dates'
+    id               = db.Column(db.Integer, primary_key=True)
+    session_id       = db.Column(db.Integer, db.ForeignKey('session_templates.id'), nullable=False)
+    date             = db.Column(db.Date, nullable=False)
+    status           = db.Column(db.String(20), default='open', nullable=False)  # open | closed
+    notes            = db.Column(db.Text)
+    closed_at        = db.Column(db.DateTime)
+    created_at       = db.Column(db.DateTime, default=datetime.utcnow)
+    active_group_ids = db.Column(db.Text)  # JSON list of Group IDs; null = all groups
+
+    attendance = db.relationship('Attendance', backref='session_date', lazy=True,
+                                  cascade='all, delete-orphan')
+    coaches    = db.relationship('Coach', secondary=_sd_coaches, lazy='subquery')
+
+    @property
+    def total_attending(self):
+        return len(self.attendance)
+
+    @property
+    def total_cash(self):
+        return sum(float(a.amount or 0) for a in self.attendance if a.payment_type == 'Cash')
+
+    @property
+    def total_card(self):
+        return sum(float(a.amount or 0) for a in self.attendance if a.payment_type == 'Card')
+
+    @property
+    def payment_summary(self):
+        counts = {}
+        for a in self.attendance:
+            counts[a.payment_type] = counts.get(a.payment_type, 0) + 1
+        return counts
+
+    @property
+    def day_active_groups(self):
+        """Groups running for this specific session date (subset of template groups)."""
+        import json as _j
+        if not self.active_group_ids:
+            return self.template.active_groups
+        try:
+            ids = set(_j.loads(self.active_group_ids))
+        except Exception:
+            return self.template.active_groups
+        return [g for g in self.template.active_groups if g.id in ids]
+
+    @property
+    def group_summary(self):
+        counts = {}
+        for a in self.attendance:
+            g = a.group.name if a.group else 'No group'
+            counts[g] = counts.get(g, 0) + 1
+        return counts
+
+
+class Attendance(db.Model):
+    __tablename__ = 'attendance'
+    id              = db.Column(db.Integer, primary_key=True)
+    session_date_id = db.Column(db.Integer, db.ForeignKey('session_dates.id'), nullable=False)
+    player_id       = db.Column(db.Integer, db.ForeignKey('players.id'),       nullable=False)
+    group_id        = db.Column(db.Integer, db.ForeignKey('groups.id'))
+    payment_type    = db.Column(db.String(30), nullable=False, default='Cash')
+    amount          = db.Column(db.Numeric(8, 2), default=0)
+    notes           = db.Column(db.Text)
+    marked_at       = db.Column(db.DateTime, default=datetime.utcnow)
+
+    group = db.relationship('Group')
+
+    __table_args__ = (db.UniqueConstraint('session_date_id', 'player_id'),)

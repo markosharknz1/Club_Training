@@ -1,0 +1,115 @@
+{% extends 'base.html' %}
+{% block title %}Coaches — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h5 class="mb-0 fw-bold">Coaches</h5>
+  <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addCoachModal">
+    + Add Coach
+  </button>
+</div>
+
+{% if coaches %}
+<div class="row g-3">
+  {% for c in coaches %}
+  <div class="col-md-6 col-lg-4">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="fw-bold">{{ c.name }}</div>
+            {% if c.phone %}
+            <div class="small"><a href="tel:{{ c.phone }}">{{ c.phone }}</a></div>
+            {% endif %}
+            {% if c.email %}
+            <div class="small text-muted">{{ c.email }}</div>
+            {% endif %}
+          </div>
+          <div class="d-flex gap-1">
+            <button class="btn btn-outline-secondary btn-sm py-0 px-2"
+                    data-bs-toggle="modal" data-bs-target="#editCoach{{ c.id }}">Edit</button>
+            <form method="post" action="/coaches" class="d-inline"
+                  onsubmit="return confirm('Remove {{ c.name }}?')">
+              <input type="hidden" name="action" value="deactivate">
+              <input type="hidden" name="coach_id" value="{{ c.id }}">
+              <button class="btn btn-outline-danger btn-sm py-0 px-2">✕</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# Edit modal #}
+  <div class="modal fade" id="editCoach{{ c.id }}" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <form method="post" action="/coaches">
+          <input type="hidden" name="action" value="edit">
+          <input type="hidden" name="coach_id" value="{{ c.id }}">
+          <div class="modal-header">
+            <h5 class="modal-title">Edit Coach</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Name <span class="text-danger">*</span></label>
+              <input type="text" name="name" class="form-control" value="{{ c.name }}" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Phone</label>
+              <input type="tel" name="phone" class="form-control" value="{{ c.phone or '' }}">
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Email</label>
+              <input type="email" name="email" class="form-control" value="{{ c.email or '' }}">
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-info">No coaches added yet. Click <strong>+ Add Coach</strong> to add one.</div>
+{% endif %}
+
+{# Add coach modal #}
+<div class="modal fade" id="addCoachModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="/coaches">
+        <input type="hidden" name="action" value="add">
+        <div class="modal-header bg-success text-white">
+          <h5 class="modal-title">Add Coach</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Name <span class="text-danger">*</span></label>
+            <input type="text" name="name" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Phone</label>
+            <input type="tel" name="phone" class="form-control">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Email</label>
+            <input type="email" name="email" class="form-control">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success">Add Coach</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,124 @@
+{% extends 'base.html' %}
+{% block title %}{{ d.strftime('%a %d %b') }} — {{ club_name }}{% endblock %}
+{% block content %}
+
+{# ── Date header ──────────────────────────────────────────────────── #}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+  <div>
+    <h5 class="mb-0 fw-bold">
+      {% if is_today %}<span class="text-primary me-2">Today</span>{% endif %}
+      {{ d.strftime('%A, %d %B %Y') }}
+    </h5>
+    {% if is_future %}
+    <div class="text-muted small">Future date — you can pre-plan sessions.</div>
+    {% endif %}
+  </div>
+  <div class="d-flex gap-1 align-items-center">
+    <a href="/day/{{ prev_day }}" class="btn btn-outline-secondary btn-sm">‹</a>
+    {% if not is_today %}
+    <a href="/day/{{ today.isoformat() }}" class="btn btn-outline-primary btn-sm">Today</a>
+    {% endif %}
+    {% if not is_future %}
+    <a href="/day/{{ next_day }}" class="btn btn-outline-secondary btn-sm">›</a>
+    {% endif %}
+    <a href="/calendar/{{ d.year }}/{{ d.month }}" class="btn btn-outline-secondary btn-sm ms-1">📅</a>
+  </div>
+</div>
+
+{# ── Check-in button ─────────────────────────────────────────────── #}
+{% if session_dates %}
+{% set open_count = session_dates | selectattr('status','eq','open') | list | length %}
+{% if open_count %}
+<div class="mb-4">
+  <a href="/day/{{ d.isoformat() }}/checkin" class="btn btn-primary btn-lg px-5">
+    Check In Players →
+  </a>
+  <span class="text-muted small ms-3">{{ open_count }} session{{ 's' if open_count != 1 }} open</span>
+</div>
+{% endif %}
+{% endif %}
+
+{# ── Sessions for this day ────────────────────────────────────────── #}
+{% if session_dates %}
+<div class="row g-3 mb-4">
+  {% for sd in session_dates %}
+  <div class="col-md-6 col-xl-4">
+    <div class="card shadow-sm border-0 h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="fw-bold">{{ sd.template.name }}</span>
+        {% if sd.status == 'open' %}
+        <span class="badge bg-success">Open</span>
+        {% else %}
+        <span class="badge bg-secondary">Closed</span>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        <div class="text-muted small mb-3">{{ sd.template.start_time }}–{{ sd.template.end_time }}</div>
+        <div class="row g-2 text-center mb-3">
+          <div class="col-4">
+            <div class="fs-3 fw-bold">{{ sd.total_attending }}</div>
+            <div class="text-muted small">Players</div>
+          </div>
+          <div class="col-4">
+            <div class="fs-4 fw-bold text-success">{{ sd.total_cash | round | int }}</div>
+            <div class="text-muted small">Cash</div>
+          </div>
+          <div class="col-4">
+            <div class="fs-4 fw-bold text-primary">{{ sd.total_card | round | int }}</div>
+            <div class="text-muted small">Card</div>
+          </div>
+        </div>
+        {% if sd.payment_summary %}
+        <div class="d-flex flex-wrap gap-1 mb-2">
+          {% for pt, cnt in sd.payment_summary.items() %}
+          <span class="badge bg-{{ PAYMENT_COLORS.get(pt,'secondary') }}" style="font-size:.7rem">
+            {{ cnt }} {{ pt }}
+          </span>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if sd.day_active_groups %}
+        <div class="d-flex flex-wrap gap-1">
+          {% for g in sd.day_active_groups %}
+          <span class="badge bg-light text-dark border" style="font-size:.7rem">{{ g.name }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      <div class="card-footer bg-transparent border-0 pt-0 pb-3 px-3">
+        {% if sd.status == 'open' %}
+        <a href="/register/{{ sd.id }}/select" class="btn btn-primary btn-sm w-100">Take Attendance →</a>
+        {% else %}
+        <a href="/register/{{ sd.id }}/detail" class="btn btn-outline-secondary btn-sm w-100">View Summary</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+
+  {# Add another session button #}
+  {% set available = all_templates | rejectattr('id', 'in', used_ids) | list %}
+  {% if available %}
+  <div class="col-md-6 col-xl-4 d-flex align-items-center justify-content-center">
+    <a href="/day/{{ d.isoformat() }}/plan"
+       class="btn btn-outline-secondary btn-lg d-flex flex-column align-items-center gap-1 py-4 px-5">
+      <span style="font-size:1.5rem">＋</span>
+      <span class="small fw-semibold">Add Session</span>
+    </a>
+  </div>
+  {% endif %}
+</div>
+
+{% else %}
+{# No sessions planned yet #}
+<div class="text-center py-5">
+  <div class="text-muted mb-3" style="font-size:2.5rem">📋</div>
+  <h6 class="fw-semibold mb-1">No sessions planned for this day</h6>
+  <p class="text-muted small mb-4">Choose which training sessions run and which groups are active.</p>
+  <a href="/day/{{ d.isoformat() }}/plan" class="btn btn-primary btn-lg px-5">
+    Plan This Day →
+  </a>
+</div>
+{% endif %}
+
+{% endblock %}

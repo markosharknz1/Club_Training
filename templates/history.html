@@ -1,0 +1,99 @@
+{% extends 'base.html' %}
+{% block title %}History — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h5 class="mb-0 fw-bold">Session History</h5>
+  <a href="/export/excel?month={{ today.strftime('%Y-%m') }}" class="btn btn-outline-secondary btn-sm">
+    ↓ Export Excel
+  </a>
+</div>
+
+{# Filter bar #}
+<form method="get" action="/history" class="row g-2 align-items-end mb-3">
+  <div class="col-auto">
+    <label class="form-label small fw-semibold mb-1">Session</label>
+    <select name="session_id" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">All sessions</option>
+      {% for s in sessions %}
+      <option value="{{ s.id }}" {% if session_filter == s.id|string %}selected{% endif %}>
+        {{ s.name }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <label class="form-label small fw-semibold mb-1">Period</label>
+    <select name="months" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="1"  {% if months==1  %}selected{% endif %}>Last month</option>
+      <option value="3"  {% if months==3  %}selected{% endif %}>Last 3 months</option>
+      <option value="6"  {% if months==6  %}selected{% endif %}>Last 6 months</option>
+      <option value="12" {% if months==12 %}selected{% endif %}>Last year</option>
+      <option value="36" {% if months==36 %}selected{% endif %}>Last 3 years</option>
+    </select>
+  </div>
+</form>
+
+{% if dates %}
+<div class="card shadow-sm border-0">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0" style="font-size:.88rem">
+      <thead class="table-dark">
+        <tr>
+          <th>Date</th>
+          <th>Session</th>
+          <th class="text-center">Players</th>
+          <th class="text-end">Cash</th>
+          <th class="text-end">Card</th>
+          <th>Payment mix</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sd in dates %}
+        <tr>
+          <td class="text-nowrap fw-semibold">{{ sd.date.strftime('%a %d %b %Y') }}</td>
+          <td>{{ sd.template.name }}</td>
+          <td class="text-center">{{ sd.total_attending }}</td>
+          <td class="text-end {% if sd.total_cash %}text-success{% else %}text-muted{% endif %}">
+            {% if sd.total_cash %}{{ sd.total_cash | round | int }}{% else %}—{% endif %}
+          </td>
+          <td class="text-end {% if sd.total_card %}text-primary{% else %}text-muted{% endif %}">
+            {% if sd.total_card %}{{ sd.total_card | round | int }}{% else %}—{% endif %}
+          </td>
+          <td>
+            <div class="d-flex gap-1 flex-wrap">
+              {% for pt, cnt in sd.payment_summary.items() %}
+              <span class="badge bg-{{ PAYMENT_COLORS.get(pt,'secondary') }}" style="font-size:.65rem">
+                {{ cnt }} {{ pt }}
+              </span>
+              {% endfor %}
+            </div>
+          </td>
+          <td>
+            {% if sd.status == 'open' %}
+            <span class="badge bg-success">Open</span>
+            {% else %}
+            <span class="badge bg-secondary">Closed</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <a href="/register/{{ sd.id }}{% if sd.status == 'closed' %}/detail{% endif %}"
+               class="btn btn-outline-secondary btn-sm py-0 px-2">
+              {{ 'View' if sd.status == 'closed' else 'Open' }}
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="text-muted small mt-2">{{ dates | length }} session{{ 's' if dates|length != 1 }} shown.</div>
+{% else %}
+<div class="alert alert-info">No sessions found for the selected filters.</div>
+{% endif %}
+
+{% endblock %}

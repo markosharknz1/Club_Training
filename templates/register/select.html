@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% block title %}Start Register — {{ club_name }}{% endblock %}
+{% block content %}
+
+<h5 class="mb-3 fw-bold">Start Register</h5>
+
+{% if open_dates %}
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-header fw-semibold text-success">⚡ Sessions Already Open</div>
+  <div class="list-group list-group-flush">
+    {% for sd in open_dates %}
+    <a href="/register/{{ sd.id }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+      <div>
+        <span class="fw-semibold">{{ sd.template.name }}</span>
+        <span class="text-muted ms-2">{{ sd.date.strftime('%a %d %b %Y') }}</span>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge bg-success">{{ sd.total_attending }} checked in</span>
+        <span class="text-primary small">Open →</span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="card shadow-sm border-0" style="max-width:480px">
+  <div class="card-header fw-semibold">Open a New Session</div>
+  <div class="card-body">
+    <form method="post" action="/register/start">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Session <span class="text-danger">*</span></label>
+        <select name="session_id" class="form-select" required>
+          <option value="">— choose a session —</option>
+          {% for s in sessions %}
+          <option value="{{ s.id }}" {% if s.day_of_week == today.weekday() %}class="fw-bold"{% endif %}>
+            {{ s.display }}{% if s.day_of_week == today.weekday() %} ← today{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+        {% if not sessions %}
+        <div class="form-text text-danger">No sessions set up yet. Go to <a href="/sessions">⚙ Setup → Training Sessions</a> first.</div>
+        {% endif %}
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Date <span class="text-danger">*</span></label>
+        <input type="date" name="date" class="form-control" value="{{ today.isoformat() }}" required>
+      </div>
+      <button type="submit" class="btn btn-primary w-100" {% if not sessions %}disabled{% endif %}>
+        Open Register →
+      </button>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

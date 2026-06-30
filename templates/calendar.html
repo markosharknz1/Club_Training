@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+{% block title %}Calendar — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <a href="/calendar/{{ prev_year }}/{{ prev_month }}" class="btn btn-outline-secondary btn-sm">‹ Prev</a>
+  <h5 class="mb-0 fw-bold">{{ month_name }} {{ year }}</h5>
+  <a href="/calendar/{{ next_year }}/{{ next_month }}" class="btn btn-outline-secondary btn-sm">Next ›</a>
+</div>
+
+<div class="card shadow-sm border-0">
+  <div class="table-responsive">
+    <table class="table table-bordered mb-0" style="table-layout:fixed">
+      <thead class="table-dark">
+        <tr>
+          {% for dn in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
+          <th class="text-center py-2" style="font-size:.8rem">{{ dn }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for week in weeks %}
+        <tr>
+          {% for d in week %}
+          {% set in_month   = d.month == month %}
+          {% set is_today_c = d == today %}
+          {% set sds        = day_map.get(d, []) %}
+          {% set is_past    = d <= today %}
+
+          <td style="height:85px; vertical-align:top; padding:4px;
+                     {% if not in_month %}opacity:.3;{% endif %}
+                     {% if is_today_c %}background:#dbeafe;{% endif %}">
+
+            {# Date number — linked if in this month and not future #}
+            {% if in_month and is_past %}
+            <a href="/day/{{ d.isoformat() }}" class="text-decoration-none">
+              <span class="fw-bold {% if is_today_c %}text-primary{% else %}text-dark{% endif %}"
+                    style="font-size:.88rem">{{ d.day }}</span>
+              {% if is_today_c %}
+              <span class="badge bg-primary ms-1" style="font-size:.55rem;vertical-align:middle">Today</span>
+              {% endif %}
+            </a>
+            {% elif in_month %}
+            <a href="/day/{{ d.isoformat() }}" class="text-decoration-none">
+              <span class="text-muted" style="font-size:.88rem">{{ d.day }}</span>
+            </a>
+            {% else %}
+            <span class="text-muted" style="font-size:.88rem">{{ d.day }}</span>
+            {% endif %}
+
+            {# Session badges #}
+            {% if sds %}
+            <div class="mt-1 d-flex flex-column gap-1">
+              {% for sd in sds %}
+              <a href="/register/{{ sd.id }}{% if sd.status == 'closed' %}/detail{% endif %}"
+                 class="text-decoration-none badge {% if sd.status == 'open' %}bg-success{% else %}bg-secondary{% endif %}"
+                 style="font-size:.6rem; text-align:left; white-space:nowrap;
+                        overflow:hidden; text-overflow:ellipsis; max-width:100%"
+                 title="{{ sd.template.name }} · {{ sd.total_attending }} players
+{%- if sd.total_cash %} · Cash {{ '%.2f' % sd.total_cash }}{% endif %}
+{%- if sd.total_card %} · Card {{ '%.2f' % sd.total_card }}{% endif %}">
+                {{ sd.template.name }} · {{ sd.total_attending }}
+              </a>
+              {% endfor %}
+            </div>
+            {% endif %}
+
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# Legend #}
+<div class="d-flex gap-3 mt-2 text-muted small">
+  <span><span class="badge bg-success me-1">●</span>Open session</span>
+  <span><span class="badge bg-secondary me-1">●</span>Closed session</span>
+  <span class="ms-1">Badge shows: session name · player count</span>
+</div>
+
+{% endblock %}
