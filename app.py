@@ -1106,6 +1106,7 @@ def create_app():
             elif section == 'testing_mode':
                 Setting.set('testing_mode', '1' if request.form.get('testing_mode') else '0')
             elif section == 'square':
+                Setting.set('square_enabled', '1' if request.form.get('square_enabled') else '0')
                 Setting.set('square_environment', request.form.get('square_environment', 'sandbox'))
                 Setting.set('square_location_id', request.form.get('square_location_id', '').strip())
                 Setting.set('square_device_id', request.form.get('square_device_id', '').strip())
@@ -1116,6 +1117,7 @@ def create_app():
             return redirect(url_for('settings'))
 
         return render_template('settings.html',
+                               square_enabled=Setting.get('square_enabled', '0') == '1',
                                square_environment=Setting.get('square_environment', 'sandbox'),
                                square_location_id=Setting.get('square_location_id', ''),
                                square_device_id=Setting.get('square_device_id', ''),
@@ -1250,7 +1252,8 @@ def create_app():
         }
 
     def _square_configured():
-        return bool(Setting.get('square_access_token', '') and Setting.get('square_device_id', ''))
+        enabled = Setting.get('square_enabled', '0') == '1'
+        return enabled and bool(Setting.get('square_access_token', '') and Setting.get('square_device_id', ''))
 
     def _square_error(resp_json):
         errs = resp_json.get('errors') or []
