@@ -3,17 +3,24 @@ from datetime import date as date_t, datetime
 
 db = SQLAlchemy()
 
-PAYMENT_TYPES  = ['Cash', 'Card', 'Voucher', 'Visit Pass', 'Free']
+PAYMENT_TYPES  = ['Cash', 'Card', 'Sports Voucher', 'Visitor', 'Other']
 AMOUNT_TYPES   = {'Cash', 'Card'}       # these record a dollar amount
 DAY_NAMES      = ['Monday', 'Tuesday', 'Wednesday', 'Thursday',
                   'Friday', 'Saturday', 'Sunday']
 PAYMENT_COLORS = {
-    'Cash':       'success',
-    'Card':       'primary',
-    'Voucher':    'warning',
-    'Visit Pass': 'info',
-    'Free':       'secondary',
+    'Cash':           'success',
+    'Card':           'primary',
+    'Sports Voucher': 'warning',
+    'Visitor':        'info',
+    'Other':          'secondary',
 }
+
+# A family may split a Sports Voucher's value across multiple activities
+# (e.g. part on badminton, part on footy), so each voucher a family brings
+# to the club must be registered here before it can be redeemed for sessions.
+# Standard voucher: $100, redeemable for 10 sessions at this club.
+DEFAULT_VOUCHER_AMOUNT   = 100
+DEFAULT_VOUCHER_SESSIONS = 10
 
 
 class Setting(db.Model):
@@ -65,6 +72,16 @@ class SessionTemplate(db.Model):
     def active_groups(self):
         return [g for g in self.groups if g.active]
 
+    @property
+    def total_checkins(self):
+        """Total kid-visits ever recorded for this session (all occurrences)."""
+        return sum(sd.total_attending for sd in self.dates)
+
+    @property
+    def total_collected(self):
+        """Total Cash + Card money ever collected for this session (all occurrences)."""
+        return sum(sd.total_cash + sd.total_card for sd in self.dates)
+
 
 class Group(db.Model):
     __tablename__ = 'groups'
@@ -98,6 +115,7 @@ class Player(db.Model):
     guardian_name      = db.Column(db.String(150))
     guardian_phone     = db.Column(db.String(30))
     guardian_email     = db.Column(db.String(150))
+    medicare_number    = db.Column(db.String(30))
     default_session_id = db.Column(db.Integer, db.ForeignKey('session_templates.id'))
     default_group_id   = db.Column(db.Integer, db.ForeignKey('groups.id'))
     active             = db.Column(db.Boolean, default=True, nullable=False)
@@ -198,6 +216,37 @@ class SessionDate(db.Model):
         return counts
 
 
+class Voucher(db.Model):
+    """A Sports Voucher a family has brought to the club to redeem for sessions.
+
+    Vouchers are issued externally (e.g. by a council/community scheme) and a
+    family may split one across multiple activities — so each voucher must be
+    registered here before attendance can be paid for with it.
+    """
+    __tablename__ = 'vouchers'
+    id             = db.Column(db.Integer, primary_key=True)
+    player_id      = db.Column(db.Integer, db.ForeignKey('players.id'), nullable=False)
+    amount         = db.Column(db.Numeric(8, 2), nullable=False, default=DEFAULT_VOUCHER_AMOUNT)
+    sessions_total = db.Column(db.Integer, nullable=False, default=DEFAULT_VOUCHER_SESSIONS)
+    date_issued    = db.Column(db.Date, nullable=False, default=date_t.today)
+    notes          = db.Column(db.String(200))
+    created_at     = db.Column(db.DateTime, default=datetime.utcnow)
+
+    player = db.relationship('Player', backref='vouchers')
+
+    @property
+    def sessions_used(self):
+        return len(self.attendance_records)
+
+    @property
+    def sessions_remaining(self):
+        return max(self.sessions_total - self.sessions_used, 0)
+
+    @property
+    def year(self):
+        return self.date_issued.year
+
+
 class Attendance(db.Model):
     __tablename__ = 'attendance'
     id              = db.Column(db.Integer, primary_key=True)
@@ -206,9 +255,11 @@ class Attendance(db.Model):
     group_id        = db.Column(db.Integer, db.ForeignKey('groups.id'))
     payment_type    = db.Column(db.String(30), nullable=False, default='Cash')
     amount          = db.Column(db.Numeric(8, 2), default=0)
+    voucher_id      = db.Column(db.Integer, db.ForeignKey('vouchers.id'))
     notes           = db.Column(db.Text)
     marked_at       = db.Column(db.DateTime, default=datetime.utcnow)
 
-    group = db.relationship('Group')
+    group   = db.relationship('Group')
+    voucher = db.relationship('Voucher', backref='attendance_records')
 
     __table_args__ = (db.UniqueConstraint('session_date_id', 'player_id'),)

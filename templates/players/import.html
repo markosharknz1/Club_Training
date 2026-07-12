@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}Import Players — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h5 class="mb-0 fw-bold">Import Players from CSV</h5>
+  <a href="/players" class="btn btn-outline-secondary btn-sm">← Back</a>
+</div>
+
+<div class="card shadow-sm border-0" style="max-width:560px">
+  <div class="card-body">
+    <form method="post" action="/players/import" enctype="multipart/form-data">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">CSV file</label>
+        <input type="file" name="csv_file" class="form-control" accept=".csv" required>
+      </div>
+      <p class="text-muted small mb-3">
+        Expected columns (any order, case-insensitive): <code>name</code>, <code>age</code>,
+        <code>guardian_name</code>, <code>guardian_phone</code>, <code>guardian_email</code>.
+        Only <code>name</code> is required — everything else is optional. Age is converted to an
+        approximate date of birth.
+      </p>
+      <pre class="bg-light p-2 rounded small mb-3">name,age,guardian_name,guardian_phone,guardian_email
+Alex Smith,9,Jane Smith,0211234567,jane@example.com
+Sam Lee,11,,0227654321,</pre>
+      <button type="submit" class="btn btn-success">Import</button>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

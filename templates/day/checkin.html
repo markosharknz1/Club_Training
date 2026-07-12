@@ -15,90 +15,160 @@
 {% if session_dates %}
 <div class="d-flex flex-wrap gap-2 mb-3">
   {% for sd in session_dates %}
-  <div class="badge bg-light text-dark border px-3 py-2" style="font-size:.8rem">
+  <a href="/register/{{ sd.id }}" class="badge bg-light text-dark border px-3 py-2 text-decoration-none" style="font-size:.8rem">
     <span class="fw-semibold">{{ sd.template.name }}</span>
     <span class="badge bg-success ms-1" data-sd-badge="{{ sd.id }}">{{ sd.total_attending }}</span>
-  </div>
+  </a>
   {% endfor %}
 </div>
 {% else %}
 <div class="alert alert-warning">No open sessions for this day. <a href="/day/{{ d.isoformat() }}/plan">Plan the day first →</a></div>
 {% endif %}
 
-{# ── Search + stats ───────────────────────────────────────────────── #}
+{# ── Search + Add Player ──────────────────────────────────────────── #}
 <div class="d-flex gap-2 align-items-center mb-3 flex-wrap">
   <input type="text" id="player-search" class="form-control"
          placeholder="Search by name…" style="max-width:260px" autocomplete="off"
          oninput="filterPlayers(this.value)">
+  <button type="button" class="btn btn-success btn-sm" onclick="openAddPlayer()">
+    + Add Player
+  </button>
   <span class="text-muted small ms-2" id="checked-count">
-    {{ attendance_map | length }} checked in of {{ all_players | length }}
+    {{ checked_players | length }} checked in of {{ (checked_players | length) + (waiting_players | length) }}
   </span>
 </div>
 
-{# ── Player list ──────────────────────────────────────────────────── #}
-<div class="card shadow-sm border-0">
+{# ── Player Database ──────────────────────────────────────────────── #}
+<div class="card shadow-sm border-0 mb-3">
+  <div class="card-header fw-bold">Player Database</div>
   <div class="table-responsive">
     <table class="table table-sm align-middle mb-0" id="player-table" style="font-size:.9rem">
       <thead class="table-dark">
         <tr>
           <th>Player</th>
-          <th class="d-none d-md-table-cell">Age</th>
-          <th class="d-none d-sm-table-cell">Guardian phone</th>
-          <th>Session / Group</th>
-          <th style="width:110px">Payment</th>
-          <th style="width:70px"></th>
+          <th>Last Session</th>
+          <th>Last Group</th>
         </tr>
       </thead>
-      <tbody>
-        {% for p in all_players %}
-        {% set info = attendance_map.get(p.id) %}
-        <tr class="player-row {% if info %}table-success{% endif %}"
+      <tbody id="player-tbody">
+        {% for p in waiting_players %}
+        {% set last = last_attendance_map.get(p.id) %}
+        <tr class="player-row"
             data-name="{{ p.name | lower }}"
-            data-player-id="{{ p.id }}">
+            data-player-id="{{ p.id }}"
+            data-recent="{{ '1' if p.id in recent_ids else '0' }}"
+            data-age="{{ p.age if p.age is not none else '' }}"
+            data-guardian="{{ p.guardian_name or '' }}"
+            data-phone="{{ p.guardian_phone or '' }}"
+            data-checkin="null"
+            data-last-session="{{ last.session_name if last else '' }}"
+            data-last-group="{{ last.group_name if last and last.group_name else '' }}"
+            style="cursor:pointer;user-select:none">
           <td>
             <div class="fw-semibold">{{ p.name }}</div>
             {% if p.siblings %}
             <span class="badge bg-info text-dark" style="font-size:.6rem">siblings</span>
             {% endif %}
           </td>
-          <td class="text-muted d-none d-md-table-cell">{{ p.age if p.age is not none else '—' }}</td>
-          <td class="text-muted small d-none d-sm-table-cell">{{ p.guardian_phone or '—' }}</td>
-          <td>
-            {% if info %}
-            <div class="fw-semibold" style="font-size:.82rem">{{ info.session_name }}</div>
-            {% if info.group_name %}<div class="text-muted" style="font-size:.75rem">{{ info.group_name }}</div>{% endif %}
-            {% else %}
-            <span class="text-muted small fst-italic">not checked in</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if info %}
-            <span class="badge bg-{{ PAYMENT_COLORS.get(info.payment_type,'secondary') }}">
-              {{ info.payment_type }}
-              {% if info.payment_type in ['Cash','Card'] and info.amount %}· {{ info.amount | int }}{% endif %}
-            </span>
-            {% endif %}
-          </td>
-          <td class="text-end">
-            <button type="button"
-                    class="btn btn-sm py-0 px-2 {% if info %}btn-success{% else %}btn-outline-primary{% endif %}"
-                    onclick="openCheckin(
-                      {{ p.id }},
-                      {{ p.name | tojson }},
-                      {{ info.sd_id if info else 'null' }},
-                      {{ info.group_id if info else 'null' }},
-                      {{ info.payment_type | tojson if info else 'null' }},
-                      {{ info.amount | int if info else 0 }}
-                    )">
-              {% if info %}✎{% else %}Check in{% endif %}
-            </button>
-          </td>
+          <td class="text-muted">{{ last.session_name if last else '' }}</td>
+          <td class="text-muted">{{ last.group_name if last and last.group_name else '' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="text-center text-muted py-4">No active players in the database.</td></tr>
+        <tr id="no-players-row"><td colspan="3" class="text-center text-muted py-3 fst-italic small">All players checked in.</td></tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
+</div>
+
+{# ── Checked In ───────────────────────────────────────────────────── #}
+<div class="card shadow-sm border-0">
+  <div class="card-header fw-bold">Checked In</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0" style="font-size:.9rem">
+      <thead class="table-dark">
+        <tr>
+          <th>Player</th>
+          <th>Session</th>
+          <th>Group</th>
+        </tr>
+      </thead>
+      <tbody id="checkedin-tbody">
+        {% for p in checked_players %}
+        {% set info = attendance_map[p.id] %}
+        <tr class="player-row"
+            data-name="{{ p.name | lower }}"
+            data-player-id="{{ p.id }}"
+            data-recent="1"
+            data-age="{{ p.age if p.age is not none else '' }}"
+            data-guardian="{{ p.guardian_name or '' }}"
+            data-phone="{{ p.guardian_phone or '' }}"
+            data-checkin="{{ {'sd_id': info.sd_id, 'group_id': info.group_id, 'payment_type': info.payment_type, 'amount': info.amount | int, 'voucher_id': info.voucher_id} | tojson }}"
+            style="cursor:pointer;user-select:none">
+          <td>
+            <div class="fw-semibold">{{ p.name }}</div>
+            {% if p.siblings %}
+            <span class="badge bg-info text-dark" style="font-size:.6rem">siblings</span>
+            {% endif %}
+          </td>
+          <td>{{ info.session_name }}</td>
+          <td class="text-muted">{{ info.group_name or '' }}</td>
+        </tr>
+        {% else %}
+        <tr id="no-checkedin-row"><td colspan="3" class="text-center text-muted py-3 fst-italic small">No players checked in yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# ══ Edit Player modal (right-click) ══════════════════════════════════ #}
+<div class="modal fade" id="editPlayerModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit Player</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="edit-player-id">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Name <span class="text-danger">*</span></label>
+          <input type="text" id="edit-name" class="form-control" autocomplete="off">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Date of birth</label>
+          <input type="date" id="edit-dob" class="form-control" style="max-width:200px">
+          <div class="form-text">Or enter age if DOB unknown:</div>
+          <input type="number" id="edit-age" class="form-control mt-1" placeholder="Age" min="1" max="99" step="1" style="max-width:120px">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Guardian name</label>
+          <input type="text" id="edit-guardian-name" class="form-control" autocomplete="off">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Guardian phone</label>
+          <input type="text" id="edit-guardian-phone" class="form-control" autocomplete="off">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Guardian email</label>
+          <input type="email" id="edit-guardian-email" class="form-control" autocomplete="off">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Medicare number</label>
+          <input type="text" id="edit-medicare-number" class="form-control" autocomplete="off" placeholder="Optional">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Notes</label>
+          <textarea id="edit-notes" class="form-control" rows="2"></textarea>
+        </div>
+        <div id="edit-player-error" class="alert alert-danger d-none small"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="confirmEditPlayer()">Save</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -153,9 +223,33 @@
           </div>
         </div>
 
-        <div class="mb-3" id="amount-row" style="display:none">
+        <div class="mb-3 d-none" id="amount-row">
           <label class="form-label fw-semibold">Amount</label>
-          <input type="number" id="modal-amount" class="form-control" step="1" min="0" value="0">
+          <div class="form-control-plaintext fw-semibold" id="modal-amount-display">—</div>
+          <input type="hidden" id="modal-amount" value="0">
+          {% if square_configured %}
+          <div class="d-none" id="square-row">
+            <button type="button" class="btn btn-outline-primary btn-sm" id="square-charge-btn"
+                    onclick="chargeOnTerminal()">
+              💳 Charge on Terminal
+            </button>
+            <div id="square-status" class="alert small mt-2 d-none"></div>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="mb-3 d-none" id="voucher-row">
+          <label class="form-label fw-semibold">Voucher <span class="text-danger">*</span></label>
+          <select id="modal-voucher" class="form-select mb-2" onchange="onVoucherSelect(this)">
+            <option value="">— select voucher —</option>
+          </select>
+          <div id="voucher-warning" class="alert alert-warning small d-none mb-2"></div>
+          <div id="voucher-empty" class="alert alert-danger small d-none mb-2">
+            No voucher on file for this child.
+          </div>
+          <button type="button" class="btn btn-outline-success btn-sm" onclick="createVoucherForPlayer()">
+            + New Voucher ({{ DEFAULT_VOUCHER_AMOUNT | int }} / {{ DEFAULT_VOUCHER_SESSIONS }} sessions)
+          </button>
         </div>
 
         <div id="modal-error" class="alert alert-danger d-none small"></div>
@@ -174,6 +268,42 @@
   </div>
 </div>
 
+{# ══ Add Player modal ═════════════════════════════════════════════════ #}
+<div class="modal fade" id="addPlayerModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Add New Player</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Player name <span class="text-danger">*</span></label>
+          <input type="text" id="new-player-name" class="form-control" placeholder="Full name" autocomplete="off">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Age</label>
+          <input type="number" id="new-player-age" class="form-control" placeholder="Optional" min="1" max="99" step="1" style="max-width:120px">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Guardian name</label>
+          <input type="text" id="new-guardian-name" class="form-control" placeholder="Optional" autocomplete="off">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Guardian phone</label>
+          <input type="text" id="new-guardian-phone" class="form-control" placeholder="Optional" autocomplete="off">
+        </div>
+        <p class="text-muted small mb-0">You can add full details later from the Players page.</p>
+        <div id="add-player-error" class="alert alert-danger d-none small mt-2"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success" onclick="confirmAddPlayer()">Add &amp; Check In</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -181,36 +311,44 @@
 const SESSIONS    = {{ sessions_js | safe }};
 const AMOUNT_TYPES = new Set({{ AMOUNT_TYPES | tojson }});
 const PAY_COLORS  = {{ PAYMENT_COLORS | tojson }};
+const DEFAULT_PAY = 'Card';
 
-let selectedSdId  = null;
-let selectedPayType = null;
-let currentPlayerId = null;
-let isCheckedIn   = false;
+let selectedSdId      = null;
+let selectedPayType   = null;
+let selectedVoucherId = null;
+let currentPlayerId   = null;
+let currentVoucherList = [];
+let voucherPromptShown = false;
+let isCheckedIn        = false;
+let squarePollTimer    = null;
+let squareCheckoutId   = null;
 
 // ── Open check-in modal ─────────────────────────────────────────────
-function openCheckin(pid, name, currentSdId, currentGroupId, currentPayType, currentAmount) {
+function openCheckin(pid, name, currentSdId, currentGroupId, currentPayType, currentAmount, currentVoucherId) {
   currentPlayerId = pid;
+  selectedVoucherId = currentVoucherId || null;
+  voucherPromptShown = false;
+  resetSquareStatus();
   isCheckedIn = currentSdId !== null;
   document.getElementById('modal-player-id').value    = pid;
   document.getElementById('modal-current-sd-id').value = currentSdId || '';
   document.getElementById('modal-name').textContent   = name;
   document.getElementById('modal-error').classList.add('d-none');
 
-  // Pre-select session
+  // Pre-select session (auto-select if only one)
   selectedSdId = currentSdId;
+  if (!selectedSdId && SESSIONS.length === 1) selectedSdId = SESSIONS[0].sd_id;
   document.querySelectorAll('.session-btn').forEach(btn => {
-    const active = parseInt(btn.dataset.sdId) === currentSdId;
+    const active = parseInt(btn.dataset.sdId) === selectedSdId;
     btn.className = 'btn text-start session-btn ' + (active ? 'btn-primary' : 'btn-outline-secondary');
   });
 
-  // Populate groups for current session
-  populateGroups(currentSdId, currentGroupId);
+  populateGroups(selectedSdId, currentGroupId);
 
-  // Pre-select payment
-  const payType = currentPayType || 'Cash';
-  selectPayType(payType, currentAmount || getDefaultAmount(currentSdId, payType));
+  // Default to Card for new check-ins, keep existing payment type otherwise
+  const payType = currentPayType || DEFAULT_PAY;
+  selectPayType(payType);
 
-  // Remove button
   document.getElementById('remove-btn').style.setProperty(
     'display', isCheckedIn ? 'inline-block' : 'none', 'important'
   );
@@ -226,7 +364,6 @@ function selectSession(sdId) {
     btn.className = 'btn text-start session-btn ' + (active ? 'btn-primary' : 'btn-outline-secondary');
   });
   populateGroups(sdId, null);
-  // Update amount default for selected session
   if (selectedPayType) selectPayType(selectedPayType);
 }
 
@@ -251,47 +388,244 @@ function getDefaultAmount(sdId, payType) {
 }
 
 // ── Select payment type ─────────────────────────────────────────────
-function selectPayType(type, amount) {
+function selectPayType(type) {
   selectedPayType = type;
   document.querySelectorAll('.pay-btn').forEach(btn => {
     const t = btn.dataset.type;
-    btn.className = 'btn pay-btn ' + (t === type ? 'pay-' + t.replace(' ', '-') : 'btn-outline-secondary');
+    btn.className = 'btn pay-btn ' + (t === type ? 'pay-' + t.replace(/\s+/g, '-') : 'btn-outline-secondary');
   });
-  const amtRow = document.getElementById('amount-row');
-  const amtInp = document.getElementById('modal-amount');
+  const amtRow     = document.getElementById('amount-row');
+  const amtInp     = document.getElementById('modal-amount');
+  const amtDisplay = document.getElementById('modal-amount-display');
   if (AMOUNT_TYPES.has(type)) {
-    amtRow.style.display = '';
-    amtInp.value = amount !== undefined ? Math.round(amount) : Math.round(getDefaultAmount(selectedSdId, type));
+    amtRow.classList.remove('d-none');
+    const amt = Math.round(getDefaultAmount(selectedSdId, type));
+    amtInp.value = amt;
+    amtDisplay.textContent = amt;
   } else {
-    amtRow.style.display = 'none';
+    amtRow.classList.add('d-none');
     amtInp.value = 0;
   }
+
+  const squareRow = document.getElementById('square-row');
+  if (squareRow) {
+    if (type === 'Card') {
+      squareRow.classList.remove('d-none');
+      resetSquareStatus();
+    } else {
+      squareRow.classList.add('d-none');
+    }
+  }
+
+  const voucherRow = document.getElementById('voucher-row');
+  if (type === 'Sports Voucher' && currentPlayerId) {
+    voucherRow.classList.remove('d-none');
+    loadVoucherOptions(currentPlayerId, selectedVoucherId);
+  } else {
+    voucherRow.classList.add('d-none');
+    selectedVoucherId = null;
+  }
+}
+
+// ── Voucher selection ────────────────────────────────────────────────
+function loadVoucherOptions(playerId, preselectId) {
+  const sel      = document.getElementById('modal-voucher');
+  const emptyMsg = document.getElementById('voucher-empty');
+  sel.innerHTML  = '<option value="">Loading…</option>';
+  document.getElementById('voucher-warning').classList.add('d-none');
+  emptyMsg.classList.add('d-none');
+
+  fetch(`/api/player/${playerId}/vouchers`)
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok) return;
+      currentVoucherList = data.vouchers;
+      sel.innerHTML = '';
+
+      if (data.vouchers.length === 0) {
+        sel.innerHTML = '<option value="">No vouchers on file</option>';
+        emptyMsg.textContent = 'No voucher on file for this child.';
+        emptyMsg.classList.remove('d-none');
+        selectedVoucherId = null;
+        promptCreateVoucher('This child has no Sports Voucher on file.');
+        return;
+      }
+
+      let chosen = null;
+      data.vouchers.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v.id;
+        opt.textContent = v.label + (v.sessions_remaining === 0 ? ' (none left)' : '');
+        if (v.sessions_remaining === 0 && v.id !== preselectId) opt.disabled = true;
+        sel.appendChild(opt);
+        if (preselectId && v.id === preselectId) chosen = v.id;
+      });
+
+      const allUsedUp = data.vouchers.every(v => v.sessions_remaining === 0);
+      if (!chosen) {
+        const firstAvailable = data.vouchers.find(v => v.sessions_remaining > 0);
+        chosen = firstAvailable ? firstAvailable.id : data.vouchers[0].id;
+      }
+      sel.value = chosen;
+      selectedVoucherId = chosen;
+
+      if (allUsedUp) {
+        emptyMsg.textContent = "This child's Sports Voucher is fully used (10/10).";
+        emptyMsg.classList.remove('d-none');
+        promptCreateVoucher("This child's Sports Voucher is fully used (10/10).");
+      } else {
+        updateVoucherWarning(data.vouchers.find(v => v.id === chosen));
+      }
+    });
+}
+
+function onVoucherSelect(selectEl) {
+  selectedVoucherId = selectEl.value ? parseInt(selectEl.value) : null;
+  updateVoucherWarning(currentVoucherList.find(v => v.id === selectedVoucherId));
+}
+
+function updateVoucherWarning(voucher) {
+  const warnMsg = document.getElementById('voucher-warning');
+  if (!voucher || voucher.sessions_remaining === 0) {
+    warnMsg.classList.add('d-none');
+    return;
+  }
+  if (voucher.sessions_remaining === 1) {
+    warnMsg.textContent = `Heads up: this is the last session on this voucher (session ${voucher.sessions_total} of ${voucher.sessions_total}).`;
+    warnMsg.classList.remove('d-none');
+  } else if (voucher.sessions_remaining === 2) {
+    warnMsg.textContent = 'Heads up: only 2 sessions will be left on this voucher after today.';
+    warnMsg.classList.remove('d-none');
+  } else {
+    warnMsg.classList.add('d-none');
+  }
+}
+
+function promptCreateVoucher(reason) {
+  if (voucherPromptShown) return;
+  voucherPromptShown = true;
+  setTimeout(() => {
+    if (confirm(reason + ' Create a new voucher now so check-in can continue?')) {
+      createVoucherForPlayer();
+    }
+  }, 50);
+}
+
+function createVoucherForPlayer() {
+  if (!currentPlayerId) return;
+  fetch(`/api/player/${currentPlayerId}/vouchers`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({}),
+  }).then(r => r.json()).then(data => {
+    if (!data.ok) {
+      showError(data.error);
+      return;
+    }
+    voucherPromptShown = false;
+    loadVoucherOptions(currentPlayerId, data.voucher.id);
+  });
+}
+
+// ── Square Terminal charge ───────────────────────────────────────────
+function resetSquareStatus() {
+  if (squarePollTimer) { clearTimeout(squarePollTimer); squarePollTimer = null; }
+  squareCheckoutId = null;
+  const btn = document.getElementById('square-charge-btn');
+  const statusEl = document.getElementById('square-status');
+  if (btn) { btn.disabled = false; btn.textContent = '💳 Charge on Terminal'; }
+  if (statusEl) { statusEl.classList.add('d-none'); statusEl.textContent = ''; }
+}
+
+function setSquareStatus(msg, level) {
+  const statusEl = document.getElementById('square-status');
+  if (!statusEl) return;
+  statusEl.textContent = msg;
+  statusEl.className = 'alert small mt-2 alert-' + level;
+  statusEl.classList.remove('d-none');
+}
+
+function chargeOnTerminal() {
+  if (!selectedSdId) { showError('Select a session first.'); return; }
+  const amount = parseFloat(document.getElementById('modal-amount').value) || 0;
+  const btn = document.getElementById('square-charge-btn');
+  btn.disabled = true;
+  btn.textContent = 'Starting…';
+  setSquareStatus('Sending to terminal…', 'info');
+
+  fetch('/api/square/checkout', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({amount, reference: `player-${currentPlayerId}-sd-${selectedSdId}`}),
+  }).then(r => r.json()).then(data => {
+    if (!data.ok) {
+      setSquareStatus(data.error, 'danger');
+      btn.disabled = false;
+      btn.textContent = '💳 Charge on Terminal';
+      return;
+    }
+    squareCheckoutId = data.checkout_id;
+    btn.textContent = 'Waiting for card…';
+    setSquareStatus('Waiting for card on the terminal…', 'info');
+    pollSquareCheckout();
+  }).catch(() => {
+    setSquareStatus('Could not reach the server.', 'danger');
+    btn.disabled = false;
+    btn.textContent = '💳 Charge on Terminal';
+  });
+}
+
+function pollSquareCheckout() {
+  if (!squareCheckoutId) return;
+  fetch(`/api/square/checkout/${squareCheckoutId}/status`)
+    .then(r => r.json())
+    .then(data => {
+      const btn = document.getElementById('square-charge-btn');
+      if (!data.ok) {
+        setSquareStatus(data.error, 'danger');
+        btn.disabled = false;
+        btn.textContent = '💳 Charge on Terminal';
+        squareCheckoutId = null;
+        return;
+      }
+      if (data.status === 'COMPLETED') {
+        setSquareStatus('Payment completed — confirming check-in…', 'success');
+        squareCheckoutId = null;
+        confirmCheckin();
+      } else if (data.status === 'CANCELED') {
+        setSquareStatus('Payment was canceled on the terminal.', 'warning');
+        btn.disabled = false;
+        btn.textContent = '💳 Charge on Terminal';
+        squareCheckoutId = null;
+      } else {
+        squarePollTimer = setTimeout(pollSquareCheckout, 2000);
+      }
+    })
+    .catch(() => { squarePollTimer = setTimeout(pollSquareCheckout, 2000); });
 }
 
 // ── Confirm check-in ────────────────────────────────────────────────
 function confirmCheckin() {
-  if (!selectedSdId) {
-    showError('Please select a session.');
-    return;
-  }
-  if (!selectedPayType) {
-    showError('Please select a payment type.');
+  if (!selectedSdId) { showError('Please select a session.'); return; }
+  if (!selectedPayType) { showError('Please select a payment type.'); return; }
+  if (selectedPayType === 'Sports Voucher' && !selectedVoucherId) {
+    showError('Select a voucher for this child, or create one.');
     return;
   }
   const playerId  = currentPlayerId;
   const groupId   = document.getElementById('modal-group').value || null;
   const amount    = parseFloat(document.getElementById('modal-amount').value) || 0;
+  const voucherId = selectedPayType === 'Sports Voucher' ? selectedVoucherId : null;
   const prevSdId  = parseInt(document.getElementById('modal-current-sd-id').value) || null;
 
-  // If player was in a different session, remove from the old one first
   const doCheckin = () => fetch('/register/' + selectedSdId + '/checkin', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({player_id: playerId, payment_type: selectedPayType, amount, group_id: groupId}),
+    body: JSON.stringify({player_id: playerId, payment_type: selectedPayType, amount, group_id: groupId, voucher_id: voucherId}),
   }).then(r => r.json()).then(data => {
     if (!data.ok) { showError(data.error); return; }
     bootstrap.Modal.getInstance(document.getElementById('checkinModal')).hide();
-    updateRow(playerId, selectedSdId, groupId, selectedPayType, amount);
+    moveToCheckedIn(playerId, selectedSdId, groupId, selectedPayType, amount, voucherId);
     updateSessionBadges(data.totals, selectedSdId);
   });
 
@@ -320,63 +654,203 @@ function removeCheckin() {
   }).then(r => r.json()).then(data => {
     if (!data.ok) return;
     bootstrap.Modal.getInstance(document.getElementById('checkinModal')).hide();
-    clearRow(currentPlayerId);
+    moveToWaiting(currentPlayerId);
     updateSessionBadges(data.totals, sdId);
   });
 }
 
-// ── DOM helpers ─────────────────────────────────────────────────────
-function updateRow(pid, sdId, groupId, payType, amount) {
-  const row = document.querySelector(`tr[data-player-id="${pid}"]`);
-  if (!row) return;
-  row.classList.add('table-success');
+// ── Add Player ───────────────────────────────────────────────────────
+function openAddPlayer() {
+  const searchVal = document.getElementById('player-search').value.trim();
+  document.getElementById('new-player-name').value    = searchVal;
+  document.getElementById('new-player-age').value     = '';
+  document.getElementById('new-guardian-name').value  = '';
+  document.getElementById('new-guardian-phone').value = '';
+  document.getElementById('add-player-error').classList.add('d-none');
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('addPlayerModal')).show();
+  setTimeout(() => {
+    const nameInp = document.getElementById('new-player-name');
+    nameInp.focus();
+    if (searchVal) nameInp.select();
+  }, 300);
+}
 
-  const sess  = SESSIONS.find(s => s.sd_id === sdId);
-  const grp   = sess ? sess.groups.find(g => g.id === parseInt(groupId)) : null;
-  const cells = row.cells;
+function confirmAddPlayer() {
+  const name          = document.getElementById('new-player-name').value.trim();
+  const age           = parseInt(document.getElementById('new-player-age').value) || null;
+  const guardianName  = document.getElementById('new-guardian-name').value.trim();
+  const guardianPhone = document.getElementById('new-guardian-phone').value.trim();
+  const errEl         = document.getElementById('add-player-error');
 
-  cells[3].innerHTML = `<div class="fw-semibold" style="font-size:.82rem">${sess ? sess.name : ''}</div>` +
-    (grp ? `<div class="text-muted" style="font-size:.75rem">${grp.name}</div>` : '');
+  if (!name) {
+    errEl.textContent = 'Player name is required.';
+    errEl.classList.remove('d-none');
+    return;
+  }
 
-  const amtStr = AMOUNT_TYPES.has(payType) && amount ? ` · ${Math.round(amount)}` : '';
-  cells[4].innerHTML = `<span class="badge bg-${PAY_COLORS[payType] || 'secondary'}">${payType}${amtStr}</span>`;
+  fetch('/api/player/quick-add', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, age, guardian_name: guardianName, guardian_phone: guardianPhone}),
+  }).then(r => r.json()).then(data => {
+    if (!data.ok) {
+      errEl.textContent = data.error;
+      errEl.classList.remove('d-none');
+      return;
+    }
+    bootstrap.Modal.getInstance(document.getElementById('addPlayerModal')).hide();
+    addPlayerRow(data.player);
+    // Open check-in for the new player immediately
+    openCheckin(data.player.id, data.player.name, null, null, null, 0, null);
+  });
+}
 
-  const btn = cells[5].querySelector('button');
-  btn.className = 'btn btn-success btn-sm py-0 px-2';
-  btn.textContent = '✎';
-  btn.onclick = () => openCheckin(pid, row.cells[0].querySelector('.fw-semibold').textContent.trim(),
-    sdId, groupId ? parseInt(groupId) : null, payType, amount);
-
+function addPlayerRow(player) {
+  const tr = document.createElement('tr');
+  tr.className = 'player-row';
+  tr.dataset.name        = player.name.toLowerCase();
+  tr.dataset.playerId    = player.id;
+  tr.dataset.recent      = '0';
+  tr.dataset.checkin     = 'null';
+  tr.dataset.lastSession = '';
+  tr.dataset.lastGroup   = '';
+  tr.style.cssText       = 'cursor:pointer;user-select:none';
+  tr.innerHTML = `<td><div class="fw-semibold">${player.name}</div></td><td></td><td></td>`;
+  insertWaitingRow(tr);
   updateCheckedCount();
 }
 
-function clearRow(pid) {
+// ── Move players between Waiting / Checked In tables ─────────────────
+function moveToCheckedIn(pid, sdId, groupId, payType, amount, voucherId) {
   const row = document.querySelector(`tr[data-player-id="${pid}"]`);
   if (!row) return;
-  row.classList.remove('table-success');
-  row.cells[3].innerHTML = '<span class="text-muted small fst-italic">not checked in</span>';
-  row.cells[4].innerHTML = '';
-  const btn = row.cells[5].querySelector('button');
-  btn.className = 'btn btn-outline-primary btn-sm py-0 px-2';
-  btn.textContent = 'Check in';
-  btn.onclick = () => openCheckin(pid, row.cells[0].querySelector('.fw-semibold').textContent.trim(),
-    null, null, null, 0);
+  const name        = row.querySelector('.fw-semibold').textContent.trim();
+  const recent      = row.dataset.recent || '0';
+  const age         = row.dataset.age || '';
+  const guardian    = row.dataset.guardian || '';
+  const phone       = row.dataset.phone || '';
+  const lastSession = row.dataset.lastSession || '';
+  const lastGroup   = row.dataset.lastGroup || '';
+  row.remove();
+
+  const sess = SESSIONS.find(s => s.sd_id === sdId);
+  const grp  = sess ? sess.groups.find(g => g.id === parseInt(groupId)) : null;
+
+  const tr = document.createElement('tr');
+  tr.className = 'player-row';
+  tr.dataset.playerId    = pid;
+  tr.dataset.name        = name.toLowerCase();
+  tr.dataset.recent      = recent;
+  tr.dataset.age         = age;
+  tr.dataset.guardian    = guardian;
+  tr.dataset.phone       = phone;
+  tr.dataset.lastSession = lastSession;
+  tr.dataset.lastGroup   = lastGroup;
+  tr.dataset.checkin     = JSON.stringify({sd_id: sdId, group_id: groupId ? parseInt(groupId) : null, payment_type: payType, amount: Math.round(amount), voucher_id: voucherId || null});
+  tr.style.cssText       = 'cursor:pointer;user-select:none';
+  tr.innerHTML = `<td><div class="fw-semibold">${name}</div></td>
+    <td>${sess ? sess.name : ''}</td>
+    <td class="text-muted">${grp ? grp.name : ''}</td>`;
+
+  insertCheckedInRow(tr);
+  refreshEmptyStates();
   updateCheckedCount();
+}
+
+function moveToWaiting(pid) {
+  const row = document.querySelector(`tr[data-player-id="${pid}"]`);
+  if (!row) return;
+  const name        = row.querySelector('.fw-semibold').textContent.trim();
+  const recent      = row.dataset.recent || '0';
+  const age         = row.dataset.age || '';
+  const guardian    = row.dataset.guardian || '';
+  const phone       = row.dataset.phone || '';
+  const lastSession = row.dataset.lastSession || '';
+  const lastGroup   = row.dataset.lastGroup || '';
+  row.remove();
+
+  const tr = document.createElement('tr');
+  tr.className = 'player-row';
+  tr.dataset.playerId    = pid;
+  tr.dataset.name        = name.toLowerCase();
+  tr.dataset.recent      = recent;
+  tr.dataset.age         = age;
+  tr.dataset.guardian    = guardian;
+  tr.dataset.phone       = phone;
+  tr.dataset.lastSession = lastSession;
+  tr.dataset.lastGroup   = lastGroup;
+  tr.dataset.checkin     = 'null';
+  tr.style.cssText       = 'cursor:pointer;user-select:none';
+  tr.innerHTML = `<td><div class="fw-semibold">${name}</div></td>
+    <td class="text-muted">${lastSession}</td>
+    <td class="text-muted">${lastGroup}</td>`;
+
+  insertWaitingRow(tr);
+  refreshEmptyStates();
+  updateCheckedCount();
+}
+
+function insertWaitingRow(row) {
+  const tbody  = document.getElementById('player-tbody');
+  const recent = row.dataset.recent === '1';
+  const name   = row.dataset.name;
+  for (const r of tbody.querySelectorAll('tr.player-row')) {
+    const rRecent = r.dataset.recent === '1';
+    if ((recent && !rRecent) || (recent === rRecent && name < r.dataset.name)) {
+      tbody.insertBefore(row, r);
+      return;
+    }
+  }
+  tbody.appendChild(row);
+}
+
+function insertCheckedInRow(row) {
+  const tbody = document.getElementById('checkedin-tbody');
+  const name  = row.dataset.name;
+  for (const r of tbody.querySelectorAll('tr.player-row')) {
+    if (name < r.dataset.name) { tbody.insertBefore(row, r); return; }
+  }
+  tbody.appendChild(row);
+}
+
+function refreshEmptyStates() {
+  const waitBody = document.getElementById('player-tbody');
+  const oldWait  = document.getElementById('no-players-row');
+  if (waitBody.querySelectorAll('tr.player-row').length === 0) {
+    if (!oldWait) {
+      const tr = document.createElement('tr');
+      tr.id = 'no-players-row';
+      tr.innerHTML = '<td colspan="3" class="text-center text-muted py-3 fst-italic small">All players checked in.</td>';
+      waitBody.appendChild(tr);
+    }
+  } else if (oldWait) {
+    oldWait.remove();
+  }
+
+  const ciBody = document.getElementById('checkedin-tbody');
+  const oldCi  = document.getElementById('no-checkedin-row');
+  if (ciBody.querySelectorAll('tr.player-row').length === 0) {
+    if (!oldCi) {
+      const tr = document.createElement('tr');
+      tr.id = 'no-checkedin-row';
+      tr.innerHTML = '<td colspan="3" class="text-center text-muted py-3 fst-italic small">No players checked in yet.</td>';
+      ciBody.appendChild(tr);
+    }
+  } else if (oldCi) {
+    oldCi.remove();
+  }
 }
 
 function updateSessionBadges(totals, sdId) {
-  // Update the session summary badges at the top
   document.querySelectorAll('[data-sd-badge]').forEach(el => {
-    if (parseInt(el.dataset.sdBadge) === sdId) {
-      el.textContent = totals.total;
-    }
+    if (parseInt(el.dataset.sdBadge) === sdId) el.textContent = totals.total;
   });
 }
 
 function updateCheckedCount() {
-  const checked = document.querySelectorAll('.player-row.table-success').length;
-  const total   = document.querySelectorAll('.player-row').length;
-  document.getElementById('checked-count').textContent = checked + ' checked in of ' + total;
+  const checked = document.querySelectorAll('#checkedin-tbody tr.player-row').length;
+  const waiting = document.querySelectorAll('#player-tbody tr.player-row').length;
+  document.getElementById('checked-count').textContent = checked + ' checked in of ' + (checked + waiting);
 }
 
 function showError(msg) {
@@ -385,11 +859,101 @@ function showError(msg) {
   el.classList.remove('d-none');
 }
 
+// ── Row event delegation ─────────────────────────────────────────────
+document.addEventListener('dblclick', function(e) {
+  const row = e.target.closest('tr.player-row');
+  if (!row) return;
+  const pid    = parseInt(row.dataset.playerId);
+  const name   = row.querySelector('.fw-semibold').textContent.trim();
+  const ci     = row.dataset.checkin && row.dataset.checkin !== 'null' ? JSON.parse(row.dataset.checkin) : null;
+  openCheckin(pid, name,
+    ci ? ci.sd_id       : null,
+    ci ? ci.group_id    : null,
+    ci ? ci.payment_type: null,
+    ci ? ci.amount      : 0,
+    ci ? ci.voucher_id  : null);
+});
+
+document.addEventListener('contextmenu', function(e) {
+  const row = e.target.closest('tr.player-row');
+  if (!row) return;
+  e.preventDefault();
+  showPlayerInfo(e, row);
+});
+
+// ── Right-click → edit player ────────────────────────────────────────
+function showPlayerInfo(e, row) {
+  e.preventDefault();
+  const pid = row.dataset.playerId;
+  fetch('/api/player/' + pid)
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok) return;
+      const p = data.player;
+      document.getElementById('edit-player-id').value      = p.id;
+      document.getElementById('edit-name').value           = p.name;
+      document.getElementById('edit-dob').value            = p.dob;
+      document.getElementById('edit-age').value            = p.dob ? '' : (p.age || '');
+      document.getElementById('edit-guardian-name').value  = p.guardian_name;
+      document.getElementById('edit-guardian-phone').value = p.guardian_phone;
+      document.getElementById('edit-guardian-email').value = p.guardian_email;
+      document.getElementById('edit-medicare-number').value = p.medicare_number;
+      document.getElementById('edit-notes').value          = p.notes;
+      document.getElementById('edit-player-error').classList.add('d-none');
+      bootstrap.Modal.getOrCreateInstance(document.getElementById('editPlayerModal')).show();
+    });
+}
+
+function confirmEditPlayer() {
+  const pid  = document.getElementById('edit-player-id').value;
+  const dob  = document.getElementById('edit-dob').value;
+  const age  = document.getElementById('edit-age').value;
+  const errEl = document.getElementById('edit-player-error');
+  fetch('/api/player/' + pid, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      name:           document.getElementById('edit-name').value.trim(),
+      dob:            dob,
+      age:            dob ? null : age,
+      guardian_name:  document.getElementById('edit-guardian-name').value.trim(),
+      guardian_phone: document.getElementById('edit-guardian-phone').value.trim(),
+      guardian_email: document.getElementById('edit-guardian-email').value.trim(),
+      medicare_number: document.getElementById('edit-medicare-number').value.trim(),
+      notes:          document.getElementById('edit-notes').value.trim(),
+    }),
+  }).then(r => r.json()).then(data => {
+    if (!data.ok) {
+      errEl.textContent = data.error;
+      errEl.classList.remove('d-none');
+      return;
+    }
+    bootstrap.Modal.getInstance(document.getElementById('editPlayerModal')).hide();
+    // Update the row's name cell and stored data attributes
+    const row = document.querySelector(`tr[data-player-id="${pid}"]`);
+    if (row) {
+      row.cells[0].querySelector('.fw-semibold').textContent = data.player.name;
+      row.dataset.name    = data.player.name.toLowerCase();
+      row.dataset.age     = data.player.age || '';
+      row.dataset.guardian = data.player.guardian_name;
+      row.dataset.phone   = data.player.guardian_phone;
+    }
+  });
+}
+
 function filterPlayers(q) {
   q = q.toLowerCase();
   document.querySelectorAll('.player-row').forEach(row => {
     row.style.display = row.dataset.name.includes(q) ? '' : 'none';
   });
 }
+
+// Stop any pending Square polling if the check-in modal is dismissed
+document.getElementById('checkinModal').addEventListener('hidden.bs.modal', function() {
+  if (squareCheckoutId) {
+    fetch(`/api/square/checkout/${squareCheckoutId}/cancel`, {method: 'POST'}).catch(() => {});
+  }
+  resetSquareStatus();
+});
 </script>
 {% endblock %}

@@ -1,3 +1,5 @@
 flask
 flask-sqlalchemy
 openpyxl
+reportlab
+requests

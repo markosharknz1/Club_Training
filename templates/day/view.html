@@ -109,6 +109,60 @@
   {% endif %}
 </div>
 
+{# ── Coaches ───────────────────────────────────────────────────────── #}
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-header fw-bold">Coaches Present</div>
+  {% if coaches %}
+  <form method="post" action="/day/{{ d.isoformat() }}/coaches">
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0" style="font-size:.9rem">
+        <thead class="table-dark">
+          <tr>
+            <th>Coach</th>
+            {% for sd in session_dates %}
+            <th class="text-center">{{ sd.template.name }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in coaches %}
+          <tr>
+            <td class="fw-semibold">{{ c.name }}</td>
+            {% for sd in session_dates %}
+            <td class="text-center">
+              <input type="checkbox" class="form-check-input" name="coach_ids_{{ sd.id }}"
+                     value="{{ c.id }}" {% if c in sd.coaches %}checked{% endif %}>
+            </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer bg-transparent border-0 text-end py-2 px-3">
+      <button type="submit" class="btn btn-primary btn-sm">Save Coaches</button>
+    </div>
+  </form>
+  {% else %}
+  <div class="card-body py-3">
+    <p class="text-muted small mb-0">No coaches added yet. <a href="/coaches">Add coaches →</a></p>
+  </div>
+  {% endif %}
+</div>
+
+{% if testing_mode %}
+{# Testing helper — reset this day back to plan page #}
+<div class="mt-4 pt-3 border-top text-center">
+  <form method="post" action="/day/{{ d.isoformat() }}/reset"
+        onsubmit="return confirm('Delete ALL sessions and attendance for this day?')">
+    <button type="submit" class="btn btn-outline-danger btn-sm">
+      🔄 Reset Day (Testing)
+    </button>
+  </form>
+  <div class="text-muted" style="font-size:.7rem;margin-top:.3rem">Deletes all sessions &amp; attendance — takes you back to Plan This Day</div>
+</div>
+{% endif %}
+
 {% else %}
 {# No sessions planned yet #}
 <div class="text-center py-5">

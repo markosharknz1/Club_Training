@@ -4,6 +4,7 @@ Run:  python app.py
 """
 import calendar as _cal_mod
 import json, socket, threading, time, webbrowser
+import requests
 from collections import defaultdict, OrderedDict
 from datetime import date, datetime, timedelta
 
@@ -12,8 +13,9 @@ from flask import (Flask, jsonify, flash, redirect, render_template,
 
 import config
 from models import (db, Setting, SessionTemplate, Group, Coach, Player,
-                    sibling_links, SessionDate, Attendance,
-                    PAYMENT_TYPES, AMOUNT_TYPES, DAY_NAMES, PAYMENT_COLORS)
+                    sibling_links, SessionDate, Attendance, Voucher,
+                    PAYMENT_TYPES, AMOUNT_TYPES, DAY_NAMES, PAYMENT_COLORS,
+                    DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
 
 # ─── App factory ────────────────────────────────────────────────────
@@ -29,6 +31,15 @@ def create_app():
         db.create_all()
         if not Setting.query.get('club_name'):
             db.session.add(Setting(key='club_name', value='My Badminton Club'))
+            db.session.commit()
+        # Lightweight migrations: older DBs won't have these columns yet.
+        cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(attendance)")).fetchall()]
+        if 'voucher_id' not in cols:
+            db.session.execute(db.text("ALTER TABLE attendance ADD COLUMN voucher_id INTEGER REFERENCES vouchers(id)"))
+            db.session.commit()
+        player_cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(players)")).fetchall()]
+        if 'medicare_number' not in player_cols:
+            db.session.execute(db.text("ALTER TABLE players ADD COLUMN medicare_number VARCHAR(30)"))
             db.session.commit()
 
     # ── Auto-close stale sessions ─────────────────────────────────────
@@ -64,13 +75,15 @@ def create_app():
                 'calendar' if ep.startswith('calendar')  else
                 'history'  if ep == 'history'            else
                 'reports'  if ep == 'reports'            else
+                'vouchers' if ep == 'vouchers'           else
                 'sessions' if ep == 'sessions'           else
                 'coaches'  if ep == 'coaches'            else
                 'settings' if ep == 'settings'           else '')
         return {
-            'club_name':   Setting.get('club_name', 'My Badminton Club'),
-            'today':       date.today(),
-            'active_page': page,
+            'club_name':    Setting.get('club_name', 'My Badminton Club'),
+            'today':        date.today(),
+            'active_page':  page,
+            'testing_mode': Setting.get('testing_mode', '0') == '1',
         }
 
     # ── Home → redirect to today's day view ──────────────────────────
@@ -98,6 +111,7 @@ def create_app():
         next_day       = (d + timedelta(days=1)).isoformat()
         is_today       = d == date.today()
         is_future      = d > date.today()
+        coaches        = Coach.query.filter_by(active=True).order_by(Coach.name).all()
 
         return render_template('day/view.html',
                                d=d, session_dates=session_dates,
@@ -105,7 +119,22 @@ def create_app():
                                used_ids=used_ids,
                                prev_day=prev_day, next_day=next_day,
                                is_today=is_today, is_future=is_future,
+                               coaches=coaches,
                                PAYMENT_COLORS=PAYMENT_COLORS)
+
+    @app.route('/day/<date_iso>/coaches', methods=['POST'])
+    def day_coaches(date_iso):
+        try:
+            d = date.fromisoformat(date_iso)
+        except ValueError:
+            return redirect(url_for('home'))
+        session_dates = SessionDate.query.filter_by(date=d).all()
+        for sd in session_dates:
+            ids = request.form.getlist(f'coach_ids_{sd.id}')
+            sd.coaches = [Coach.query.get(int(c)) for c in ids if c]
+        db.session.commit()
+        flash('Coaches updated.', 'success')
+        return redirect(url_for('day_view', date_iso=date_iso))
 
     @app.route('/day/<date_iso>/plan')
     def day_plan(date_iso):
@@ -147,14 +176,26 @@ def create_app():
 
         if new_sds:
             db.session.commit()
-            # One session opened → go straight to player selection
-            if len(new_sds) == 1:
-                return redirect(url_for('register_select_players', sd_id=new_sds[0].id))
-            # Multiple sessions opened → day view to pick which one
-            flash(f'{len(new_sds)} sessions opened for {d.strftime("%A, %d %B %Y")}.', 'success')
         else:
             flash('No new sessions to add.', 'warning')
-        return redirect(url_for('day_view', date_iso=date_iso))
+            return redirect(url_for('day_view', date_iso=date_iso))
+        return redirect(url_for('day_checkin', date_iso=date_iso))
+
+    @app.route('/day/<date_iso>/reset', methods=['POST'])
+    def day_reset(date_iso):
+        """Delete all sessions for a date (for testing — resets to plan page)."""
+        try:
+            d = date.fromisoformat(date_iso)
+        except ValueError:
+            return redirect(url_for('home'))
+
+        sds = SessionDate.query.filter_by(date=d).all()
+        for sd in sds:
+            Attendance.query.filter_by(session_date_id=sd.id).delete()
+            db.session.delete(sd)
+        db.session.commit()
+        flash(f'Day reset — all sessions for {d.strftime("%d %b %Y")} deleted.', 'warning')
+        return redirect(url_for('day_plan', date_iso=date_iso))
 
     # ── Calendar ──────────────────────────────────────────────────────
 
@@ -217,9 +258,17 @@ def create_app():
         all_active_players = (Player.query.filter_by(active=True)
                               .order_by(Player.name).all())
 
+        last_played_map = dict(
+            db.session.query(Attendance.player_id, db.func.max(SessionDate.date))
+            .join(SessionDate, Attendance.session_date_id == SessionDate.id)
+            .group_by(Attendance.player_id)
+            .all()
+        )
+
         return render_template('players/list.html',
                                players=player_list, sessions=sessions, all_groups=all_groups,
                                all_active_players=all_active_players,
+                               last_played_map=last_played_map,
                                q=q, session_id=session_id, group_id=group_id,
                                show_inactive=show_inactive)
 
@@ -243,6 +292,67 @@ def create_app():
         flash(f'{p.name} added.', 'success')
         return redirect(url_for('players'))
 
+    @app.route('/players/import', methods=['GET', 'POST'])
+    def players_import():
+        if request.method == 'POST':
+            file = request.files.get('csv_file')
+            if not file or not file.filename:
+                flash('Choose a CSV file first.', 'danger')
+                return redirect(url_for('players_import'))
+
+            import csv, io
+            text   = file.stream.read().decode('utf-8-sig', errors='replace')
+            reader = csv.DictReader(io.StringIO(text))
+
+            # Flexible header matching — case/space-insensitive
+            field_map = {
+                'name':      {'name', 'full name', 'player', 'player name'},
+                'age':       {'age'},
+                'guardian_name':  {'guardian', 'guardian name', 'parent', 'parent name'},
+                'guardian_phone': {'guardian phone', 'phone', 'contact', 'guardian contact'},
+                'guardian_email': {'guardian email', 'email'},
+            }
+            headers = {(h or '').strip().lower().replace('_', ' '): h for h in (reader.fieldnames or [])}
+            col = {}
+            for field, aliases in field_map.items():
+                for alias in aliases:
+                    if alias in headers:
+                        col[field] = headers[alias]
+                        break
+
+            added, skipped = 0, 0
+            today = date.today()
+            for row in reader:
+                name = (row.get(col.get('name'), '') or '').strip() if col.get('name') else ''
+                if not name:
+                    skipped += 1
+                    continue
+
+                dob = None
+                age_str = (row.get(col.get('age'), '') or '').strip() if col.get('age') else ''
+                if age_str:
+                    try:
+                        dob = today.replace(year=today.year - int(age_str))
+                    except (ValueError, TypeError):
+                        pass
+
+                db.session.add(Player(
+                    name=name,
+                    date_of_birth=dob,
+                    guardian_name=(row.get(col.get('guardian_name'), '') or '').strip() or None if col.get('guardian_name') else None,
+                    guardian_phone=(row.get(col.get('guardian_phone'), '') or '').strip() or None if col.get('guardian_phone') else None,
+                    guardian_email=(row.get(col.get('guardian_email'), '') or '').strip() or None if col.get('guardian_email') else None,
+                ))
+                added += 1
+
+            db.session.commit()
+            flash(f'{added} player{"s" if added != 1 else ""} imported.'
+                  + (f' {skipped} row{"s" if skipped != 1 else ""} skipped (missing name).' if skipped else ''),
+                  'success' if added else 'warning')
+            return redirect(url_for('players'))
+
+        return render_template('players/import.html')
+
     @app.route('/players/<int:pid>')
     def player_detail(pid):
         p      = Player.query.get_or_404(pid)
@@ -250,7 +360,22 @@ def create_app():
                   .join(SessionDate)
                   .order_by(SessionDate.date.desc())
                   .limit(25).all())
+
+        cutoff_3mo = date.today() - timedelta(days=90)
+        recent_3mo = (Attendance.query.filter_by(player_id=pid)
+                      .join(SessionDate)
+                      .filter(SessionDate.date >= cutoff_3mo)
+                      .order_by(SessionDate.date.desc()).all())
+
+        last_year       = date.today().year - 1
+        last_year_count = (Attendance.query.filter_by(player_id=pid)
+                           .join(SessionDate)
+                           .filter(db.extract('year', SessionDate.date) == last_year)
+                           .count())
+
         return render_template('players/detail.html', player=p, recent=recent,
+                               recent_3mo=recent_3mo,
+                               last_year=last_year, last_year_count=last_year_count,
                                PAYMENT_COLORS=PAYMENT_COLORS)
 
     @app.route('/players/<int:pid>/edit', methods=['GET', 'POST'])
@@ -269,6 +394,7 @@ def create_app():
             p.guardian_name      = request.form.get('guardian_name', '').strip()
             p.guardian_phone     = request.form.get('guardian_phone', '').strip()
             p.guardian_email     = request.form.get('guardian_email', '').strip()
+            p.medicare_number    = request.form.get('medicare_number', '').strip() or None
             p.default_session_id = _int(request.form.get('session_id'))
             p.default_group_id   = _int(request.form.get('group_id'))
             p.notes              = request.form.get('notes', '').strip()
@@ -391,6 +517,34 @@ def create_app():
                     'group_name':   a.group.name if a.group else None,
                     'payment_type': a.payment_type,
                     'amount':       float(a.amount or 0),
+                    'voucher_id':   a.voucher_id,
+                }
+
+        # Players who attended within the last 3 months → prioritised in the waiting list
+        cutoff = d - timedelta(days=90)
+        recent_ids = {
+            pid for (pid,) in db.session.query(Attendance.player_id)
+                .join(SessionDate, Attendance.session_date_id == SessionDate.id)
+                .filter(SessionDate.date < d, SessionDate.date >= cutoff)
+                .distinct()
+        }
+
+        checked_players = [p for p in all_players if p.id in attendance_map]
+        waiting_players = [p for p in all_players if p.id not in attendance_map]
+        waiting_players.sort(key=lambda p: (p.id not in recent_ids, p.name.lower()))
+
+        # Map player_id → most recent past session/group attended (for reference only)
+        last_attendance_map = {}
+        past = (db.session.query(Attendance, SessionDate)
+                .join(SessionDate, Attendance.session_date_id == SessionDate.id)
+                .filter(SessionDate.date < d)
+                .order_by(SessionDate.date.desc())
+                .all())
+        for a, sd_row in past:
+            if a.player_id not in last_attendance_map:
+                last_attendance_map[a.player_id] = {
+                    'session_name': sd_row.template.name,
+                    'group_name':   a.group.name if a.group else None,
                 }
 
         # Sessions data for JS modal
@@ -409,12 +563,18 @@ def create_app():
         return render_template('day/checkin.html',
                                d=d,
                                session_dates=session_dates,
-                               all_players=all_players,
+                               checked_players=checked_players,
+                               waiting_players=waiting_players,
                                attendance_map=attendance_map,
+                               recent_ids=recent_ids,
+                               last_attendance_map=last_attendance_map,
                                sessions_js=json.dumps(sessions_js),
                                PAYMENT_TYPES=PAYMENT_TYPES,
                                AMOUNT_TYPES=list(AMOUNT_TYPES),
-                               PAYMENT_COLORS=PAYMENT_COLORS)
+                               PAYMENT_COLORS=PAYMENT_COLORS,
+                               DEFAULT_VOUCHER_AMOUNT=DEFAULT_VOUCHER_AMOUNT,
+                               DEFAULT_VOUCHER_SESSIONS=DEFAULT_VOUCHER_SESSIONS,
+                               square_configured=_square_configured())
 
     @app.route('/register/<int:sd_id>/select', methods=['GET', 'POST'])
     def register_select_players(sd_id):
@@ -513,16 +673,49 @@ def create_app():
         payment_type = data.get('payment_type', 'Cash')
         amount       = float(data.get('amount') or 0)
         group_id     = _int(data.get('group_id'))
+        voucher_id   = _int(data.get('voucher_id'))
 
         rec = Attendance.query.filter_by(session_date_id=sd_id, player_id=player_id).first()
+
+        if payment_type == 'Sports Voucher':
+            already_id = rec.voucher_id if rec else None
+            if voucher_id:
+                voucher = Voucher.query.filter_by(id=voucher_id, player_id=player_id).first()
+                if not voucher:
+                    return jsonify({'ok': False, 'error': 'Voucher not found for this player.'})
+            else:
+                # No specific voucher chosen (e.g. checked in from a page without a
+                # voucher picker) — fall back to the oldest voucher with sessions left.
+                voucher = None
+                for v in (Voucher.query.filter_by(player_id=player_id)
+                          .order_by(Voucher.date_issued).all()):
+                    eff_remaining = v.sessions_remaining + (1 if v.id == already_id else 0)
+                    if eff_remaining > 0:
+                        voucher = v
+                        break
+                if not voucher:
+                    return jsonify({'ok': False, 'error':
+                        'No Sports Voucher on file with sessions remaining for this child. '
+                        'Register one on the Vouchers page.'})
+                voucher_id = voucher.id
+
+            already_this_voucher = rec is not None and rec.voucher_id == voucher_id
+            effective_remaining = voucher.sessions_remaining + (1 if already_this_voucher else 0)
+            if effective_remaining <= 0:
+                return jsonify({'ok': False, 'error': 'That voucher has no sessions remaining.'})
+        else:
+            voucher_id = None
+
         if rec:
             rec.payment_type = payment_type
             rec.amount       = amount
             rec.group_id     = group_id
+            rec.voucher_id   = voucher_id
         else:
             db.session.add(Attendance(
                 session_date_id=sd_id, player_id=player_id,
                 group_id=group_id, payment_type=payment_type, amount=amount,
+                voucher_id=voucher_id,
             ))
         db.session.commit()
         db.session.refresh(sd)
@@ -600,6 +793,165 @@ def create_app():
                                session_filter=session_filter, months=months,
                                PAYMENT_COLORS=PAYMENT_COLORS)
 
+    # ── Sports Vouchers ──────────────────────────────────────────────
+
+    @app.route('/vouchers', methods=['GET', 'POST'])
+    def vouchers():
+        if request.method == 'POST':
+            action = request.form.get('action')
+            if action == 'add':
+                player_id   = int(request.form['player_id'])
+                amount      = float(request.form.get('amount') or DEFAULT_VOUCHER_AMOUNT)
+                sessions    = int(request.form.get('sessions_total') or DEFAULT_VOUCHER_SESSIONS)
+                issued_str  = request.form.get('date_issued') or date.today().isoformat()
+                issued_date = date.fromisoformat(issued_str)
+                notes       = request.form.get('notes', '').strip() or None
+                limit_error = _voucher_limit_error(player_id, issued_date)
+                if limit_error:
+                    flash(limit_error, 'danger')
+                else:
+                    db.session.add(Voucher(
+                        player_id=player_id, amount=amount, sessions_total=sessions,
+                        date_issued=issued_date, notes=notes,
+                    ))
+                    db.session.commit()
+                    flash('Voucher created.', 'success')
+            elif action == 'delete':
+                v = Voucher.query.get_or_404(int(request.form['voucher_id']))
+                if v.sessions_used:
+                    flash('Cannot delete a voucher that has already been used.', 'danger')
+                else:
+                    db.session.delete(v)
+                    db.session.commit()
+                    flash('Voucher deleted.', 'success')
+            return redirect(url_for('vouchers', year=request.form.get('year', '')))
+
+        year = request.args.get('year', date.today().year, type=int)
+        voucher_list = (Voucher.query.join(Player)
+                        .filter(db.extract('year', Voucher.date_issued) == year)
+                        .order_by(Player.name, Voucher.date_issued).all())
+
+        available_years = sorted({
+            y for (y,) in db.session.query(db.extract('year', Voucher.date_issued)).distinct().all()
+        }, reverse=True) or [date.today().year]
+
+        active_players = Player.query.filter_by(active=True).order_by(Player.name).all()
+
+        return render_template('vouchers.html',
+                               voucher_list=voucher_list, year=year, available_years=available_years,
+                               active_players=active_players,
+                               DEFAULT_VOUCHER_AMOUNT=DEFAULT_VOUCHER_AMOUNT,
+                               DEFAULT_VOUCHER_SESSIONS=DEFAULT_VOUCHER_SESSIONS)
+
+    @app.route('/vouchers/<int:voucher_id>/pdf')
+    def voucher_pdf(voucher_id):
+        import io
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from flask import send_file
+
+        v = Voucher.query.get_or_404(voucher_id)
+        p = v.player
+        usage = (Attendance.query.filter_by(voucher_id=v.id)
+                 .join(SessionDate)
+                 .order_by(SessionDate.date).all())
+
+        buf    = io.BytesIO()
+        doc    = SimpleDocTemplate(buf, pagesize=A4, topMargin=20 * mm, bottomMargin=20 * mm)
+        styles = getSampleStyleSheet()
+        club_name = Setting.get('club_name', 'My Badminton Club')
+        elements = [
+            Paragraph(club_name, styles['Title']),
+            Paragraph('Sports Voucher Usage Record', styles['Heading2']),
+            Spacer(1, 8 * mm),
+        ]
+
+        info_data = [
+            ['Player name:',        p.name],
+            ['Medicare number:',    p.medicare_number or '—'],
+            ['Voucher date issued:', v.date_issued.strftime('%d %b %Y')],
+            ['Voucher amount:',     f'${int(round(float(v.amount)))}'],
+            ['Sessions total:',     str(v.sessions_total)],
+            ['Sessions used:',      str(v.sessions_used)],
+            ['Sessions remaining:', str(v.sessions_remaining)],
+        ]
+        info_table = Table(info_data, colWidths=[50 * mm, 100 * mm])
+        info_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(info_table)
+        elements.append(Spacer(1, 10 * mm))
+        elements.append(Paragraph('Sessions Attended Using This Voucher', styles['Heading3']))
+        elements.append(Spacer(1, 4 * mm))
+
+        table_data = [['Date', 'Session', 'Group']]
+        for a in usage:
+            table_data.append([
+                a.session_date.date.strftime('%d %b %Y'),
+                a.session_date.template.name,
+                a.group.name if a.group else '—',
+            ])
+        if len(table_data) == 1:
+            table_data.append(['No sessions recorded yet.', '', ''])
+
+        usage_table = Table(table_data, colWidths=[40 * mm, 70 * mm, 40 * mm])
+        usage_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a5c')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f4f6f9')]),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        elements.append(usage_table)
+        elements.append(Spacer(1, 10 * mm))
+        elements.append(Paragraph(f'Generated {date.today().strftime("%d %b %Y")}', styles['Normal']))
+
+        doc.build(elements)
+        buf.seek(0)
+
+        safe_name = ''.join(c if c.isalnum() else '_' for c in p.name)
+        filename = f'voucher_{safe_name}_{v.date_issued.isoformat()}.pdf'
+        return send_file(buf, mimetype='application/pdf', as_attachment=True, download_name=filename)
+
+    @app.route('/api/player/<int:player_id>/vouchers')
+    def api_player_vouchers(player_id):
+        vs = Voucher.query.filter_by(player_id=player_id).order_by(Voucher.date_issued.desc()).all()
+        return jsonify(ok=True, vouchers=[{
+            'id':                 v.id,
+            'label':              f"{v.date_issued.strftime('%d %b %Y')} — {v.sessions_used}/{v.sessions_total} used, {v.sessions_remaining} left",
+            'sessions_total':     v.sessions_total,
+            'sessions_used':      v.sessions_used,
+            'sessions_remaining': v.sessions_remaining,
+        } for v in vs])
+
+    @app.route('/api/player/<int:player_id>/vouchers', methods=['POST'])
+    def api_player_voucher_create(player_id):
+        Player.query.get_or_404(player_id)
+        data     = request.get_json() or {}
+        amount   = float(data.get('amount') or DEFAULT_VOUCHER_AMOUNT)
+        sessions = int(data.get('sessions_total') or DEFAULT_VOUCHER_SESSIONS)
+        issued_date = date.today()
+        limit_error = _voucher_limit_error(player_id, issued_date)
+        if limit_error:
+            return jsonify(ok=False, error=limit_error)
+        v = Voucher(player_id=player_id, amount=amount, sessions_total=sessions, date_issued=issued_date)
+        db.session.add(v)
+        db.session.commit()
+        return jsonify(ok=True, voucher={
+            'id':                 v.id,
+            'label':              f"{v.date_issued.strftime('%d %b %Y')} — 0/{v.sessions_total} used, {v.sessions_remaining} left",
+            'sessions_total':     v.sessions_total,
+            'sessions_used':      0,
+            'sessions_remaining': v.sessions_remaining,
+        })
+
     # ── Coaches ──────────────────────────────────────────────────────
 
     @app.route('/coaches', methods=['GET', 'POST'])
@@ -639,7 +991,8 @@ def create_app():
         session_filter = request.args.get('session_id', '')
         start          = date.today() - timedelta(days=months * 30)
 
-        q = SessionDate.query.filter(SessionDate.date >= start).order_by(SessionDate.date)
+        q = (SessionDate.query.join(SessionTemplate)
+             .filter(SessionDate.date >= start).order_by(SessionDate.date))
         if session_filter:
             try:
                 q = q.filter_by(session_id=int(session_filter))
@@ -746,11 +1099,27 @@ def create_app():
     @app.route('/settings', methods=['GET', 'POST'])
     def settings():
         if request.method == 'POST':
-            name = request.form.get('club_name', '').strip() or 'My Badminton Club'
-            Setting.set('club_name', name)
+            section = request.form.get('section', 'general')
+            if section == 'general':
+                name = request.form.get('club_name', '').strip() or 'My Badminton Club'
+                Setting.set('club_name', name)
+            elif section == 'testing_mode':
+                Setting.set('testing_mode', '1' if request.form.get('testing_mode') else '0')
+            elif section == 'square':
+                Setting.set('square_environment', request.form.get('square_environment', 'sandbox'))
+                Setting.set('square_location_id', request.form.get('square_location_id', '').strip())
+                Setting.set('square_device_id', request.form.get('square_device_id', '').strip())
+                new_token = request.form.get('square_access_token', '').strip()
+                if new_token:
+                    Setting.set('square_access_token', new_token)
             flash('Settings saved.', 'success')
             return redirect(url_for('settings'))
-        return render_template('settings.html')
+
+        return render_template('settings.html',
+                               square_environment=Setting.get('square_environment', 'sandbox'),
+                               square_location_id=Setting.get('square_location_id', ''),
+                               square_device_id=Setting.get('square_device_id', ''),
+                               square_token_set=bool(Setting.get('square_access_token', '')))
 
     # ── Export ───────────────────────────────────────────────────────
 
@@ -867,6 +1236,84 @@ def create_app():
         return send_file(buf, as_attachment=True, download_name=fname,
                          mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
+    # ── Square Terminal payments ──────────────────────────────────────
+
+    def _square_base_url():
+        env = Setting.get('square_environment', 'sandbox')
+        return 'https://connect.squareupsandbox.com' if env == 'sandbox' else 'https://connect.squareup.com'
+
+    def _square_headers():
+        return {
+            'Square-Version':  '2024-06-04',
+            'Authorization':   f"Bearer {Setting.get('square_access_token', '')}",
+            'Content-Type':    'application/json',
+        }
+
+    def _square_configured():
+        return bool(Setting.get('square_access_token', '') and Setting.get('square_device_id', ''))
+
+    def _square_error(resp_json):
+        errs = resp_json.get('errors') or []
+        return errs[0].get('detail', 'Square API error.') if errs else 'Square API error.'
+
+    @app.route('/api/square/checkout', methods=['POST'])
+    def square_create_checkout():
+        if not _square_configured():
+            return jsonify(ok=False, error='Square is not set up yet. Add your access token and device ID in Settings.')
+        data   = request.get_json() or {}
+        amount = float(data.get('amount') or 0)
+        if amount <= 0:
+            return jsonify(ok=False, error='Amount must be greater than zero.')
+
+        import uuid
+        body = {
+            'idempotency_key': str(uuid.uuid4()),
+            'checkout': {
+                'amount_money':   {'amount': int(round(amount * 100)), 'currency': 'AUD'},
+                'device_options': {'device_id': Setting.get('square_device_id')},
+                'reference_id':   str(data.get('reference') or '')[:40],
+            },
+        }
+        try:
+            resp = requests.post(f'{_square_base_url()}/v2/terminals/checkouts',
+                                 headers=_square_headers(), json=body, timeout=10)
+            result = resp.json()
+        except requests.RequestException as e:
+            return jsonify(ok=False, error=f'Could not reach Square: {e}')
+        if resp.status_code >= 300:
+            return jsonify(ok=False, error=_square_error(result))
+
+        checkout = result.get('checkout', {})
+        return jsonify(ok=True, checkout_id=checkout.get('id'), status=checkout.get('status'))
+
+    @app.route('/api/square/checkout/<checkout_id>/status')
+    def square_checkout_status(checkout_id):
+        try:
+            resp = requests.get(f'{_square_base_url()}/v2/terminals/checkouts/{checkout_id}',
+                                headers=_square_headers(), timeout=10)
+            result = resp.json()
+        except requests.RequestException as e:
+            return jsonify(ok=False, error=str(e))
+        if resp.status_code >= 300:
+            return jsonify(ok=False, error=_square_error(result))
+
+        checkout = result.get('checkout', {})
+        return jsonify(ok=True, status=checkout.get('status'))
+
+    @app.route('/api/square/checkout/<checkout_id>/cancel', methods=['POST'])
+    def square_checkout_cancel(checkout_id):
+        try:
+            resp = requests.post(f'{_square_base_url()}/v2/terminals/checkouts/{checkout_id}/cancel',
+                                 headers=_square_headers(), timeout=10)
+            result = resp.json()
+        except requests.RequestException as e:
+            return jsonify(ok=False, error=str(e))
+        if resp.status_code >= 300:
+            return jsonify(ok=False, error=_square_error(result))
+
+        checkout = result.get('checkout', {})
+        return jsonify(ok=True, status=checkout.get('status'))
+
     # ── API ──────────────────────────────────────────────────────────
 
     @app.route('/api/groups/<int:session_id>')
@@ -874,6 +1321,79 @@ def create_app():
         groups = (Group.query.filter_by(session_id=session_id, active=True)
                   .order_by(Group.sort_order).all())
         return jsonify([{'id': g.id, 'name': g.name} for g in groups])
+
+    @app.route('/api/player/<int:player_id>')
+    def api_player_get(player_id):
+        p = Player.query.get_or_404(player_id)
+        return jsonify(ok=True, player={
+            'id':            p.id,
+            'name':          p.name,
+            'dob':           p.date_of_birth.isoformat() if p.date_of_birth else '',
+            'age':           p.age,
+            'guardian_name':  p.guardian_name or '',
+            'guardian_phone': p.guardian_phone or '',
+            'guardian_email': p.guardian_email or '',
+            'medicare_number': p.medicare_number or '',
+            'notes':         p.notes or '',
+        })
+
+    @app.route('/api/player/<int:player_id>', methods=['POST'])
+    def api_player_save(player_id):
+        p = Player.query.get_or_404(player_id)
+        data = request.get_json()
+        name = (data.get('name') or '').strip()
+        if not name:
+            return jsonify(ok=False, error='Name is required.')
+        p.name          = name
+        p.guardian_name  = (data.get('guardian_name') or '').strip() or None
+        p.guardian_phone = (data.get('guardian_phone') or '').strip() or None
+        p.guardian_email = (data.get('guardian_email') or '').strip() or None
+        p.medicare_number = (data.get('medicare_number') or '').strip() or None
+        p.notes         = (data.get('notes') or '').strip() or None
+        dob_str = (data.get('dob') or '').strip()
+        if dob_str:
+            try:
+                from datetime import date as _d
+                p.date_of_birth = _d.fromisoformat(dob_str)
+            except ValueError:
+                pass
+        elif data.get('age'):
+            try:
+                today = date.today()
+                p.date_of_birth = today.replace(year=today.year - int(data['age']))
+            except (ValueError, TypeError):
+                pass
+        db.session.commit()
+        return jsonify(ok=True, player={
+            'id':           p.id,
+            'name':         p.name,
+            'age':          p.age,
+            'guardian_name':  p.guardian_name or '',
+            'guardian_phone': p.guardian_phone or '',
+        })
+
+    @app.route('/api/player/quick-add', methods=['POST'])
+    def api_player_quick_add():
+        data = request.get_json()
+        name = (data.get('name') or '').strip()
+        if not name:
+            return jsonify(ok=False, error='Name is required.')
+        dob = None
+        age = data.get('age')
+        if age:
+            try:
+                today = date.today()
+                dob = today.replace(year=today.year - int(age))
+            except (ValueError, TypeError):
+                pass
+        p = Player(name=name,
+                   date_of_birth=dob,
+                   guardian_name=(data.get('guardian_name') or '').strip() or None,
+                   guardian_phone=(data.get('guardian_phone') or '').strip() or None)
+        db.session.add(p)
+        db.session.commit()
+        return jsonify(ok=True, player={'id': p.id, 'name': p.name,
+                                        'age': p.age, 'guardian_phone': p.guardian_phone})
 
     return app
 
@@ -885,6 +1405,19 @@ def _int(v):
         return int(v) if v else None
     except (TypeError, ValueError):
         return None
+
+
+def _voucher_limit_error(player_id, issued_date):
+    """Returns an error message if creating a voucher for this player/date would
+    breach the 2-active / 2-per-calendar-year Sports Voucher limits, else None."""
+    vouchers = Voucher.query.filter_by(player_id=player_id).all()
+    active_count = sum(1 for v in vouchers if v.sessions_remaining > 0)
+    if active_count >= 2:
+        return 'This child already has 2 active vouchers. Use one up before creating another.'
+    year_count = sum(1 for v in vouchers if v.date_issued.year == issued_date.year)
+    if year_count >= 2:
+        return f'This child has already been issued 2 vouchers in {issued_date.year} (the yearly maximum).'
+    return None
 
 
 def _save_siblings(player_id, sibling_ids):

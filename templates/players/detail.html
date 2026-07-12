@@ -29,6 +29,8 @@
           <dd class="col-7">{{ player.default_group.name if player.default_group else '—' }}</dd>
           <dt class="col-5 text-muted">Total attended</dt>
           <dd class="col-7">{{ player.total_attended }} sessions</dd>
+          <dt class="col-5 text-muted">Medicare number</dt>
+          <dd class="col-7">{{ player.medicare_number or '—' }}</dd>
           {% if player.notes %}
           <dt class="col-5 text-muted">Notes</dt>
           <dd class="col-7">{{ player.notes }}</dd>
@@ -80,7 +82,71 @@
   {% endif %}
 </div>
 
-{# Attendance history #}
+{# Attendance summary stats #}
+<div class="row g-3 mb-4">
+  <div class="col-4 col-md-3">
+    <div class="card shadow-sm border-0 text-center">
+      <div class="card-body py-3">
+        <div class="fs-3 fw-bold">{{ recent_3mo | length }}</div>
+        <div class="text-muted small">Last 3 Months</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-4 col-md-3">
+    <div class="card shadow-sm border-0 text-center">
+      <div class="card-body py-3">
+        <div class="fs-3 fw-bold">{{ last_year_count }}</div>
+        <div class="text-muted small">Played in {{ last_year }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-4 col-md-3">
+    <div class="card shadow-sm border-0 text-center">
+      <div class="card-body py-3">
+        <div class="fs-3 fw-bold">{{ player.total_attended }}</div>
+        <div class="text-muted small">Total</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Last 3 months #}
+<h6 class="text-muted text-uppercase fw-bold mb-2" style="font-size:.7rem;letter-spacing:.08em">Last 3 Months</h6>
+{% if recent_3mo %}
+<div class="card shadow-sm border-0 mb-4">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0" style="font-size:.88rem">
+      <thead class="table-dark">
+        <tr>
+          <th>Date</th><th>Session</th><th>Group</th>
+          <th>Payment</th><th class="text-end">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in recent_3mo %}
+        <tr>
+          <td class="text-nowrap">{{ a.session_date.date.strftime('%a %d %b %Y') }}</td>
+          <td>{{ a.session_date.template.name }}</td>
+          <td>{{ a.group.name if a.group else '—' }}</td>
+          <td>
+            <span class="badge bg-{{ PAYMENT_COLORS.get(a.payment_type, 'secondary') }}">
+              {{ a.payment_type }}
+            </span>
+          </td>
+          <td class="text-end">
+            {% if a.payment_type in ['Cash','Card'] %}{{ '%.2f' % (a.amount|float) }}{% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<p class="text-muted small">No sessions attended in the last 3 months.</p>
+{% endif %}
+
+{# Full attendance history #}
 {% if recent %}
 <h6 class="text-muted text-uppercase fw-bold mb-2" style="font-size:.7rem;letter-spacing:.08em">Attendance History</h6>
 <div class="card shadow-sm border-0">

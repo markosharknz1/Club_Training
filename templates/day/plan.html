@@ -62,13 +62,13 @@
             <div class="form-check">
               <input class="form-check-input" type="checkbox"
                      name="groups_{{ s.id }}" value="{{ g.id }}"
-                     id="grp{{ g.id }}" checked>
+                     id="grp{{ g.id }}">
               <label class="form-check-label" for="grp{{ g.id }}">{{ g.name }}</label>
             </div>
           </div>
           {% endfor %}
         </div>
-        <div class="form-text mt-1">Uncheck any groups not running today.</div>
+        <div class="form-text mt-1">Check any groups running today.</div>
       </div>
       {% else %}
       <div class="card-body py-2" id="groups-{{ s.id }}"
