@@ -3,3 +3,4 @@ flask-sqlalchemy
 openpyxl
 reportlab
 requests
+pywebview

@@ -41,6 +41,22 @@ def create_app():
         if 'medicare_number' not in player_cols:
             db.session.execute(db.text("ALTER TABLE players ADD COLUMN medicare_number VARCHAR(30)"))
             db.session.commit()
+        if 'category' not in player_cols:
+            db.session.execute(db.text("ALTER TABLE players ADD COLUMN category VARCHAR(10) NOT NULL DEFAULT 'Junior'"))
+            db.session.commit()
+        if 'address' not in player_cols:
+            db.session.execute(db.text("ALTER TABLE players ADD COLUMN address VARCHAR(250)"))
+            db.session.commit()
+        if 'own_email' not in player_cols:
+            db.session.execute(db.text("ALTER TABLE players ADD COLUMN own_email VARCHAR(150)"))
+            db.session.commit()
+        if 'own_phone' not in player_cols:
+            db.session.execute(db.text("ALTER TABLE players ADD COLUMN own_phone VARCHAR(30)"))
+            db.session.commit()
+        session_tmpl_cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(session_templates)")).fetchall()]
+        if 'category' not in session_tmpl_cols:
+            db.session.execute(db.text("ALTER TABLE session_templates ADD COLUMN category VARCHAR(10) NOT NULL DEFAULT 'Mixed'"))
+            db.session.commit()
 
     # ── Auto-close stale sessions ─────────────────────────────────────
 
@@ -269,6 +285,7 @@ def create_app():
                                players=player_list, sessions=sessions, all_groups=all_groups,
                                all_active_players=all_active_players,
                                last_played_map=last_played_map,
+                               field_cfg=_player_field_settings(),
                                q=q, session_id=session_id, group_id=group_id,
                                show_inactive=show_inactive)
 
@@ -278,9 +295,13 @@ def create_app():
         p = Player(
             name=request.form['name'].strip(),
             date_of_birth=date.fromisoformat(dob_str) if dob_str else None,
+            category=request.form.get('category', 'Junior'),
             guardian_name=request.form.get('guardian_name', '').strip(),
             guardian_phone=request.form.get('guardian_phone', '').strip(),
             guardian_email=request.form.get('guardian_email', '').strip(),
+            address=request.form.get('address', '').strip() or None,
+            own_email=request.form.get('own_email', '').strip() or None,
+            own_phone=request.form.get('own_phone', '').strip() or None,
             default_session_id=_int(request.form.get('session_id')),
             default_group_id=_int(request.form.get('group_id')),
             notes=request.form.get('notes', '').strip(),
@@ -308,6 +329,10 @@ def create_app():
             field_map = {
                 'name':      {'name', 'full name', 'player', 'player name'},
                 'age':       {'age'},
+                'category':  {'category', 'junior/senior', 'type'},
+                'address':   {'address'},
+                'own_email': {'own email', 'player email'},
+                'own_phone': {'own phone', 'player phone'},
                 'guardian_name':  {'guardian', 'guardian name', 'parent', 'parent name'},
                 'guardian_phone': {'guardian phone', 'phone', 'contact', 'guardian contact'},
                 'guardian_email': {'guardian email', 'email'},
@@ -336,9 +361,17 @@ def create_app():
                     except (ValueError, TypeError):
                         pass
 
+                category = (row.get(col.get('category'), '') or '').strip().capitalize() if col.get('category') else ''
+                if category not in ('Junior', 'Senior'):
+                    category = 'Junior'
+
                 db.session.add(Player(
                     name=name,
                     date_of_birth=dob,
+                    category=category,
+                    address=(row.get(col.get('address'), '') or '').strip() or None if col.get('address') else None,
+                    own_email=(row.get(col.get('own_email'), '') or '').strip() or None if col.get('own_email') else None,
+                    own_phone=(row.get(col.get('own_phone'), '') or '').strip() or None if col.get('own_phone') else None,
                     guardian_name=(row.get(col.get('guardian_name'), '') or '').strip() or None if col.get('guardian_name') else None,
                     guardian_phone=(row.get(col.get('guardian_phone'), '') or '').strip() or None if col.get('guardian_phone') else None,
                     guardian_email=(row.get(col.get('guardian_email'), '') or '').strip() or None if col.get('guardian_email') else None,
@@ -376,6 +409,7 @@ def create_app():
         return render_template('players/detail.html', player=p, recent=recent,
                                recent_3mo=recent_3mo,
                                last_year=last_year, last_year_count=last_year_count,
+                               field_cfg=_player_field_settings(),
                                PAYMENT_COLORS=PAYMENT_COLORS)
 
     @app.route('/players/<int:pid>/edit', methods=['GET', 'POST'])
@@ -391,9 +425,13 @@ def create_app():
             dob_str = request.form.get('date_of_birth', '').strip()
             p.name               = request.form['name'].strip()
             p.date_of_birth      = date.fromisoformat(dob_str) if dob_str else None
+            p.category           = request.form.get('category', 'Junior')
             p.guardian_name      = request.form.get('guardian_name', '').strip()
             p.guardian_phone     = request.form.get('guardian_phone', '').strip()
             p.guardian_email     = request.form.get('guardian_email', '').strip()
+            p.address            = request.form.get('address', '').strip() or None
+            p.own_email          = request.form.get('own_email', '').strip() or None
+            p.own_phone          = request.form.get('own_phone', '').strip() or None
             p.medicare_number    = request.form.get('medicare_number', '').strip() or None
             p.default_session_id = _int(request.form.get('session_id'))
             p.default_group_id   = _int(request.form.get('group_id'))
@@ -415,7 +453,8 @@ def create_app():
         current_sib_ids = [s.id for s in p.siblings]
         return render_template('players/edit.html',
                                player=p, sessions=sessions, groups=groups,
-                               all_players=all_players, current_sib_ids=current_sib_ids)
+                               all_players=all_players, current_sib_ids=current_sib_ids,
+                               field_cfg=_player_field_settings())
 
     # ── Sessions ─────────────────────────────────────────────────────
 
@@ -432,6 +471,7 @@ def create_app():
                     end_time=request.form['end_time'],
                     price_cash=float(request.form.get('price_cash') or 0),
                     price_card=float(request.form.get('price_card') or 0),
+                    category=request.form.get('category', 'Mixed'),
                 )
                 db.session.add(s)
                 db.session.flush()
@@ -447,6 +487,7 @@ def create_app():
                 s.end_time     = request.form['end_time']
                 s.price_cash   = float(request.form.get('price_cash') or 0)
                 s.price_card   = float(request.form.get('price_card') or 0)
+                s.category     = request.form.get('category', 'Mixed')
                 db.session.commit()
                 flash('Session updated.', 'success')
 
@@ -574,7 +615,8 @@ def create_app():
                                PAYMENT_COLORS=PAYMENT_COLORS,
                                DEFAULT_VOUCHER_AMOUNT=DEFAULT_VOUCHER_AMOUNT,
                                DEFAULT_VOUCHER_SESSIONS=DEFAULT_VOUCHER_SESSIONS,
-                               square_configured=_square_configured())
+                               square_configured=_square_configured(),
+                               field_cfg=_player_field_settings())
 
     @app.route('/register/<int:sd_id>/select', methods=['GET', 'POST'])
     def register_select_players(sd_id):
@@ -1113,6 +1155,15 @@ def create_app():
                 new_token = request.form.get('square_access_token', '').strip()
                 if new_token:
                     Setting.set('square_access_token', new_token)
+            elif section == 'player_fields':
+                for cat, default_min, default_max in (('junior', '0', '17'), ('senior', '18', '99')):
+                    age_min = request.form.get(f'{cat}_age_min', '').strip()
+                    age_max = request.form.get(f'{cat}_age_max', '').strip()
+                    Setting.set(f'{cat}_age_min', age_min or default_min)
+                    Setting.set(f'{cat}_age_max', age_max or default_max)
+                    for field in ('age', 'address', 'email', 'parent_contact', 'phone'):
+                        key = f'{cat}_track_{field}'
+                        Setting.set(key, '1' if request.form.get(key) else '0')
             flash('Settings saved.', 'success')
             return redirect(url_for('settings'))
 
@@ -1121,7 +1172,8 @@ def create_app():
                                square_environment=Setting.get('square_environment', 'sandbox'),
                                square_location_id=Setting.get('square_location_id', ''),
                                square_device_id=Setting.get('square_device_id', ''),
-                               square_token_set=bool(Setting.get('square_access_token', '')))
+                               square_token_set=bool(Setting.get('square_access_token', '')),
+                               field_cfg=_player_field_settings())
 
     # ── Export ───────────────────────────────────────────────────────
 
@@ -1331,11 +1383,15 @@ def create_app():
         return jsonify(ok=True, player={
             'id':            p.id,
             'name':          p.name,
+            'category':      p.category,
             'dob':           p.date_of_birth.isoformat() if p.date_of_birth else '',
             'age':           p.age,
             'guardian_name':  p.guardian_name or '',
             'guardian_phone': p.guardian_phone or '',
             'guardian_email': p.guardian_email or '',
+            'address':       p.address or '',
+            'own_email':     p.own_email or '',
+            'own_phone':     p.own_phone or '',
             'medicare_number': p.medicare_number or '',
             'notes':         p.notes or '',
         })
@@ -1348,9 +1404,13 @@ def create_app():
         if not name:
             return jsonify(ok=False, error='Name is required.')
         p.name          = name
+        p.category       = data.get('category') or p.category
         p.guardian_name  = (data.get('guardian_name') or '').strip() or None
         p.guardian_phone = (data.get('guardian_phone') or '').strip() or None
         p.guardian_email = (data.get('guardian_email') or '').strip() or None
+        p.address        = (data.get('address') or '').strip() or None
+        p.own_email      = (data.get('own_email') or '').strip() or None
+        p.own_phone      = (data.get('own_phone') or '').strip() or None
         p.medicare_number = (data.get('medicare_number') or '').strip() or None
         p.notes         = (data.get('notes') or '').strip() or None
         dob_str = (data.get('dob') or '').strip()
@@ -1410,6 +1470,29 @@ def _int(v):
         return None
 
 
+def _player_field_settings():
+    """Which optional player fields each category (Junior/Senior) records, and their
+    age brackets — configured on the Settings page under 'Player Categories & Fields'."""
+    def cat_cfg(cat, default_age_min, default_age_max, defaults):
+        return {
+            'age_min':        int(Setting.get(f'{cat}_age_min', default_age_min) or default_age_min),
+            'age_max':        int(Setting.get(f'{cat}_age_max', default_age_max) or default_age_max),
+            'age':            Setting.get(f'{cat}_track_age', defaults['age']) == '1',
+            'address':        Setting.get(f'{cat}_track_address', defaults['address']) == '1',
+            'email':          Setting.get(f'{cat}_track_email', defaults['email']) == '1',
+            'parent_contact': Setting.get(f'{cat}_track_parent_contact', defaults['parent_contact']) == '1',
+            'phone':          Setting.get(f'{cat}_track_phone', defaults['phone']) == '1',
+        }
+    return {
+        'junior': cat_cfg('junior', 0, 17, {
+            'age': '1', 'address': '0', 'email': '0', 'parent_contact': '1', 'phone': '0',
+        }),
+        'senior': cat_cfg('senior', 18, 99, {
+            'age': '1', 'address': '1', 'email': '1', 'parent_contact': '0', 'phone': '1',
+        }),
+    }
+
+
 def _voucher_limit_error(player_id, issued_date):
     """Returns an error message if creating a voucher for this player/date would
     breach the 2-active / 2-per-calendar-year Sports Voucher limits, else None."""
@@ -1462,14 +1545,42 @@ def _free_port(start=7433):
     return start
 
 
+def _wait_for_server(port, timeout=5):
+    """Poll until the local Flask server accepts connections (or give up after timeout)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(('127.0.0.1', port), timeout=0.3):
+                return True
+        except OSError:
+            time.sleep(0.1)
+    return False
+
+
 if __name__ == '__main__':
-    import socket
     app  = create_app()
     port = _free_port()
-    threading.Thread(
-        target=lambda: (time.sleep(1.2), webbrowser.open(f'http://localhost:{port}')),
+
+    server_thread = threading.Thread(
+        target=lambda: app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False),
         daemon=True,
-    ).start()
-    print(f'\n  Badminton Club running at http://localhost:{port}')
-    print('  Close this window (or press Ctrl+C) to stop.\n')
-    app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False)
+    )
+    server_thread.start()
+    _wait_for_server(port)
+
+    with app.app_context():
+        club_name = Setting.get('club_name', 'Badminton Club')
+
+    try:
+        import webview
+        webview.create_window(club_name, f'http://127.0.0.1:{port}',
+                              width=1280, height=850, min_size=(1000, 650))
+        webview.start()
+    except ImportError:
+        print('  Desktop window unavailable — pywebview is not installed.')
+        print('  Run install.bat to add it (pywebview), then restart for a proper app window.')
+        print('  Falling back to your default browser for now.\n')
+        webbrowser.open(f'http://localhost:{port}')
+        print(f'  Badminton Club running at http://localhost:{port}')
+        print('  Close this window (or press Ctrl+C) to stop.\n')
+        server_thread.join()

@@ -53,6 +53,7 @@ class SessionTemplate(db.Model):
     end_time     = db.Column(db.String(5),  nullable=False)
     price_cash   = db.Column(db.Numeric(8, 2), default=0)
     price_card   = db.Column(db.Numeric(8, 2), default=0)
+    category     = db.Column(db.String(10), default='Mixed', nullable=False)  # Junior | Senior | Mixed
     active       = db.Column(db.Boolean, default=True, nullable=False)
 
     groups = db.relationship('Group', backref='session', lazy=True,
@@ -116,6 +117,10 @@ class Player(db.Model):
     guardian_phone     = db.Column(db.String(30))
     guardian_email     = db.Column(db.String(150))
     medicare_number    = db.Column(db.String(30))
+    category           = db.Column(db.String(10), default='Junior', nullable=False)  # Junior | Senior
+    address            = db.Column(db.String(250))
+    own_email          = db.Column(db.String(150))
+    own_phone          = db.Column(db.String(30))
     default_session_id = db.Column(db.Integer, db.ForeignKey('session_templates.id'))
     default_group_id   = db.Column(db.Integer, db.ForeignKey('groups.id'))
     active             = db.Column(db.Boolean, default=True, nullable=False)

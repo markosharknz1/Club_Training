@@ -2,8 +2,12 @@
 {% block title %}{{ player.name }} — {{ club_name }}{% endblock %}
 {% block content %}
 
+{% set cfg = field_cfg.junior if player.category == 'Junior' else field_cfg.senior %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <h5 class="mb-0 fw-bold">{{ player.name }}
+    <span class="badge {% if player.category == 'Junior' %}bg-info text-dark{% else %}bg-primary{% endif %} ms-1">
+      {{ player.category }}
+    </span>
     {% if not player.active %}<span class="badge bg-secondary ms-2">Inactive</span>{% endif %}
   </h5>
   <div class="d-flex gap-2">
@@ -18,11 +22,17 @@
       <div class="card-header fw-semibold">Player Details</div>
       <div class="card-body">
         <dl class="row mb-0 small">
+          {% if cfg.age %}
           <dt class="col-5 text-muted">Date of birth</dt>
           <dd class="col-7">
             {{ player.date_of_birth.strftime('%d %b %Y') if player.date_of_birth else '—' }}
             {% if player.age %}<span class="text-muted">(age {{ player.age }})</span>{% endif %}
           </dd>
+          {% endif %}
+          {% if cfg.address %}
+          <dt class="col-5 text-muted">Address</dt>
+          <dd class="col-7">{{ player.address or '—' }}</dd>
+          {% endif %}
           <dt class="col-5 text-muted">Session</dt>
           <dd class="col-7">{{ player.default_session.name if player.default_session else '—' }}</dd>
           <dt class="col-5 text-muted">Group</dt>
@@ -40,6 +50,35 @@
     </div>
   </div>
 
+  {% if cfg.email or cfg.phone %}
+  <div class="col-md-3">
+    <div class="card shadow-sm border-0 h-100">
+      <div class="card-header fw-semibold">Player's Own Contact</div>
+      <div class="card-body">
+        <dl class="row mb-0 small">
+          {% if cfg.phone %}
+          <dt class="col-5 text-muted">Phone</dt>
+          <dd class="col-7">
+            {% if player.own_phone %}
+              <a href="tel:{{ player.own_phone }}">{{ player.own_phone }}</a>
+            {% else %}—{% endif %}
+          </dd>
+          {% endif %}
+          {% if cfg.email %}
+          <dt class="col-5 text-muted">Email</dt>
+          <dd class="col-7">
+            {% if player.own_email %}
+              <a href="mailto:{{ player.own_email }}">{{ player.own_email }}</a>
+            {% else %}—{% endif %}
+          </dd>
+          {% endif %}
+        </dl>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if cfg.parent_contact %}
   <div class="col-md-4">
     <div class="card shadow-sm border-0 h-100">
       <div class="card-header fw-semibold">Guardian / Contact</div>
@@ -63,6 +102,7 @@
       </div>
     </div>
   </div>
+  {% endif %}
 
   {% if player.siblings %}
   <div class="col-md-3">

@@ -105,20 +105,43 @@
               <input type="text" name="name" class="form-control" required placeholder="e.g. Alex Smith">
             </div>
             <div class="col-md-5">
+              <label class="form-label fw-semibold">Category</label>
+              <select name="category" id="add-category" class="form-select" onchange="applyFieldVisibility('add', this.value)">
+                <option value="Junior">Junior</option>
+                <option value="Senior">Senior</option>
+              </select>
+            </div>
+            <div class="col-md-5" id="add-age-field">
               <label class="form-label fw-semibold">Date of birth</label>
               <input type="date" name="date_of_birth" class="form-control">
             </div>
-            <div class="col-md-5">
-              <label class="form-label fw-semibold">Guardian name</label>
-              <input type="text" name="guardian_name" class="form-control" placeholder="Parent / guardian">
+            <div class="col-md-5" id="add-address-field">
+              <label class="form-label fw-semibold">Address</label>
+              <input type="text" name="address" class="form-control" placeholder="Optional">
             </div>
-            <div class="col-md-4">
-              <label class="form-label fw-semibold">Guardian phone</label>
-              <input type="tel" name="guardian_phone" class="form-control">
+            <div class="col-md-4" id="add-own-phone-field">
+              <label class="form-label fw-semibold">Player's phone</label>
+              <input type="tel" name="own_phone" class="form-control" placeholder="Optional">
             </div>
-            <div class="col-md-3">
-              <label class="form-label fw-semibold">Guardian email</label>
-              <input type="email" name="guardian_email" class="form-control">
+            <div class="col-md-4" id="add-own-email-field">
+              <label class="form-label fw-semibold">Player's email</label>
+              <input type="email" name="own_email" class="form-control" placeholder="Optional">
+            </div>
+            <div class="col-12" id="add-parent-block">
+              <div class="row g-3">
+                <div class="col-md-5">
+                  <label class="form-label fw-semibold">Guardian name</label>
+                  <input type="text" name="guardian_name" class="form-control" placeholder="Parent / guardian">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label fw-semibold">Guardian phone</label>
+                  <input type="tel" name="guardian_phone" class="form-control">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label fw-semibold">Guardian email</label>
+                  <input type="email" name="guardian_email" class="form-control">
+                </div>
+              </div>
             </div>
             <div class="col-md-5">
               <label class="form-label fw-semibold">Usual session</label>
@@ -166,6 +189,24 @@
 
 {% block scripts %}
 <script>
+const FIELD_CFG = {{ field_cfg | tojson }};
+
+// Show/hide optional fields based on selected Junior/Senior category
+function applyFieldVisibility(prefix, category) {
+  const cfg = FIELD_CFG[category.toLowerCase()];
+  if (!cfg) return;
+  const set = (id, show) => {
+    const el = document.getElementById(prefix + id);
+    if (el) el.style.display = show ? '' : 'none';
+  };
+  set('-age-field', cfg.age);
+  set('-parent-block', cfg.parent_contact);
+  set('-address-field', cfg.address);
+  set('-own-email-field', cfg.email);
+  set('-own-phone-field', cfg.phone);
+}
+document.addEventListener('DOMContentLoaded', () => applyFieldVisibility('add', 'Junior'));
+
 // Cascade groups when session changes in Add modal
 document.getElementById('add-session').addEventListener('change', function() {
   const grp = document.getElementById('add-group');

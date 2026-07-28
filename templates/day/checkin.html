@@ -137,22 +137,43 @@
           <input type="text" id="edit-name" class="form-control" autocomplete="off">
         </div>
         <div class="mb-3">
+          <label class="form-label fw-semibold">Category</label>
+          <select id="edit-category" class="form-select" onchange="applyFieldVisibility('edit', this.value)">
+            <option value="Junior">Junior</option>
+            <option value="Senior">Senior</option>
+          </select>
+        </div>
+        <div class="mb-3" id="edit-age-field">
           <label class="form-label fw-semibold">Date of birth</label>
           <input type="date" id="edit-dob" class="form-control" style="max-width:200px">
           <div class="form-text">Or enter age if DOB unknown:</div>
           <input type="number" id="edit-age" class="form-control mt-1" placeholder="Age" min="1" max="99" step="1" style="max-width:120px">
         </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Guardian name</label>
-          <input type="text" id="edit-guardian-name" class="form-control" autocomplete="off">
+        <div class="mb-3" id="edit-address-field">
+          <label class="form-label fw-semibold">Address</label>
+          <input type="text" id="edit-address" class="form-control" autocomplete="off" placeholder="Optional">
         </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Guardian phone</label>
-          <input type="text" id="edit-guardian-phone" class="form-control" autocomplete="off">
+        <div class="mb-3" id="edit-own-phone-field">
+          <label class="form-label fw-semibold">Player's phone</label>
+          <input type="text" id="edit-own-phone" class="form-control" autocomplete="off" placeholder="Optional">
         </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Guardian email</label>
-          <input type="email" id="edit-guardian-email" class="form-control" autocomplete="off">
+        <div class="mb-3" id="edit-own-email-field">
+          <label class="form-label fw-semibold">Player's email</label>
+          <input type="email" id="edit-own-email" class="form-control" autocomplete="off" placeholder="Optional">
+        </div>
+        <div id="edit-parent-block">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Guardian name</label>
+            <input type="text" id="edit-guardian-name" class="form-control" autocomplete="off">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Guardian phone</label>
+            <input type="text" id="edit-guardian-phone" class="form-control" autocomplete="off">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Guardian email</label>
+            <input type="email" id="edit-guardian-email" class="form-control" autocomplete="off">
+          </div>
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Medicare number</label>
@@ -312,6 +333,22 @@ const SESSIONS    = {{ sessions_js | safe }};
 const AMOUNT_TYPES = new Set({{ AMOUNT_TYPES | tojson }});
 const PAY_COLORS  = {{ PAYMENT_COLORS | tojson }};
 const DEFAULT_PAY = 'Card';
+const FIELD_CFG   = {{ field_cfg | tojson }};
+
+// Show/hide optional player fields based on selected Junior/Senior category
+function applyFieldVisibility(prefix, category) {
+  const cfg = FIELD_CFG[category.toLowerCase()];
+  if (!cfg) return;
+  const set = (id, show) => {
+    const el = document.getElementById(prefix + id);
+    if (el) el.style.display = show ? '' : 'none';
+  };
+  set('-age-field', cfg.age);
+  set('-parent-block', cfg.parent_contact);
+  set('-address-field', cfg.address);
+  set('-own-email-field', cfg.email);
+  set('-own-phone-field', cfg.phone);
+}
 
 let selectedSdId      = null;
 let selectedPayType   = null;
@@ -892,8 +929,13 @@ function showPlayerInfo(e, row) {
       const p = data.player;
       document.getElementById('edit-player-id').value      = p.id;
       document.getElementById('edit-name').value           = p.name;
+      document.getElementById('edit-category').value       = p.category;
+      applyFieldVisibility('edit', p.category);
       document.getElementById('edit-dob').value            = p.dob;
       document.getElementById('edit-age').value            = p.dob ? '' : (p.age || '');
+      document.getElementById('edit-address').value        = p.address;
+      document.getElementById('edit-own-phone').value      = p.own_phone;
+      document.getElementById('edit-own-email').value      = p.own_email;
       document.getElementById('edit-guardian-name').value  = p.guardian_name;
       document.getElementById('edit-guardian-phone').value = p.guardian_phone;
       document.getElementById('edit-guardian-email').value = p.guardian_email;
@@ -914,8 +956,12 @@ function confirmEditPlayer() {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
       name:           document.getElementById('edit-name').value.trim(),
+      category:       document.getElementById('edit-category').value,
       dob:            dob,
       age:            dob ? null : age,
+      address:        document.getElementById('edit-address').value.trim(),
+      own_phone:      document.getElementById('edit-own-phone').value.trim(),
+      own_email:      document.getElementById('edit-own-email').value.trim(),
       guardian_name:  document.getElementById('edit-guardian-name').value.trim(),
       guardian_phone: document.getElementById('edit-guardian-phone').value.trim(),
       guardian_email: document.getElementById('edit-guardian-email').value.trim(),

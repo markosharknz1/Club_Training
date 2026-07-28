@@ -18,7 +18,12 @@
 <div class="col-lg-6">
   <div class="card shadow-sm border-0">
     <div class="card-header d-flex justify-content-between align-items-center">
-      <span class="fw-bold">{{ s.name }}</span>
+      <span>
+        <span class="fw-bold">{{ s.name }}</span>
+        <span class="badge {% if s.category == 'Junior' %}bg-info text-dark{% elif s.category == 'Senior' %}bg-primary{% else %}bg-secondary{% endif %} ms-1">
+          {{ s.category }}
+        </span>
+      </span>
       <div class="d-flex gap-2">
         <button class="btn btn-outline-secondary btn-sm"
                 data-bs-toggle="modal" data-bs-target="#editModal{{ s.id }}">Edit</button>
@@ -115,12 +120,20 @@
               <label class="form-label fw-semibold">End time</label>
               <input type="time" name="end_time" class="form-control" value="{{ s.end_time }}">
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Category</label>
+              <select name="category" class="form-select">
+                <option value="Junior" {% if s.category == 'Junior' %}selected{% endif %}>Junior</option>
+                <option value="Senior" {% if s.category == 'Senior' %}selected{% endif %}>Senior</option>
+                <option value="Mixed"  {% if s.category == 'Mixed'  %}selected{% endif %}>Mixed</option>
+              </select>
+            </div>
+            <div class="col-md-4">
               <label class="form-label fw-semibold">Cash price (per player)</label>
               <input type="number" name="price_cash" class="form-control" step="1" min="0"
                      value="{{ s.price_cash | float | round | int }}">
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
               <label class="form-label fw-semibold">Card price (per player)</label>
               <input type="number" name="price_card" class="form-control" step="1" min="0"
                      value="{{ s.price_card | float | round | int }}">
@@ -204,11 +217,19 @@
               <label class="form-label fw-semibold">End time</label>
               <input type="time" name="end_time" class="form-control" value="20:00">
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Category</label>
+              <select name="category" class="form-select">
+                <option value="Junior">Junior</option>
+                <option value="Senior">Senior</option>
+                <option value="Mixed" selected>Mixed</option>
+              </select>
+            </div>
+            <div class="col-md-4">
               <label class="form-label fw-semibold">Cash price</label>
               <input type="number" name="price_cash" class="form-control" step="1" min="0" value="0.00">
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
               <label class="form-label fw-semibold">Card price</label>
               <input type="number" name="price_card" class="form-control" step="1" min="0" value="0.00">
             </div>
