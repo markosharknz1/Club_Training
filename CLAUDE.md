@@ -1,4 +1,4 @@
-# Badminton Club App — Project Context
+# Club_Training App — Project Context
 
 A fully local Flask web app for a junior badminton club to run day-to-day check-in, attendance,
 payments, coaches, and Sports Voucher tracking. Built for the user (club admin) to run on their
@@ -6,10 +6,12 @@ own machine and demo to other club members (e.g. "Carol").
 
 ## Where things live
 
-- **App root:** `C:\BadmintonClub\` (moved out of OneDrive early on — SQLite + OneDrive sync can
-  corrupt the database file, so it must **never** live in a cloud-synced folder).
-- **GitHub:** private repo at https://github.com/markosharknz1/BadmintonClub (`git remote origin`,
-  branch `master`). Push only when the user explicitly asks ("push to github please").
+- **App root:** `C:\Club_Training\` (renamed from `C:\BadmintonClub` — was itself moved out of
+  OneDrive early on, since SQLite + OneDrive sync can corrupt the database file, so it must
+  **never** live in a cloud-synced folder).
+- **GitHub:** private repo at https://github.com/markosharknz1/Club_Training (renamed from
+  `BadmintonClub` via `gh repo rename`; `git remote origin` was updated automatically, branch
+  `master`). Push only when the user explicitly asks ("push to github please").
 - **Run it:** `run.bat` (runs `python app.py`). The Flask server still runs internally on
   `127.0.0.1` (no LAN/firewall exposure), but it's launched in a background thread and displayed
   in a **native desktop window via `pywebview`** — no browser tab, no URL bar, no need for
@@ -179,7 +181,7 @@ own machine and demo to other club members (e.g. "Carol").
 
 ## Resuming after a context reset
 
-1. `git log --oneline -10` and `git status` in `C:\BadmintonClub` to see the latest committed
+1. `git log --oneline -10` and `git status` in `C:\Club_Training` to see the latest committed
    state and confirm nothing is stashed/uncommitted.
 2. Re-read this file — it should stay accurate; update it as part of any future large feature work.
 3. Check the "Known open items" section above before assuming a feature is finished.
