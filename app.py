@@ -274,17 +274,22 @@ def create_app():
         all_active_players = (Player.query.filter_by(active=True)
                               .order_by(Player.name).all())
 
-        last_played_map = dict(
-            db.session.query(Attendance.player_id, db.func.max(SessionDate.date))
-            .join(SessionDate, Attendance.session_date_id == SessionDate.id)
-            .group_by(Attendance.player_id)
-            .all()
-        )
+        last_attendance_map = {}
+        for a, sd_row in (db.session.query(Attendance, SessionDate)
+                          .join(SessionDate, Attendance.session_date_id == SessionDate.id)
+                          .order_by(SessionDate.date.desc())
+                          .all()):
+            if a.player_id not in last_attendance_map:
+                last_attendance_map[a.player_id] = {
+                    'date':         sd_row.date,
+                    'session_name': sd_row.template.name,
+                    'group_name':   a.group.name if a.group else None,
+                }
 
         return render_template('players/list.html',
                                players=player_list, sessions=sessions, all_groups=all_groups,
                                all_active_players=all_active_players,
-                               last_played_map=last_played_map,
+                               last_attendance_map=last_attendance_map,
                                field_cfg=_player_field_settings(),
                                q=q, session_id=session_id, group_id=group_id,
                                show_inactive=show_inactive)

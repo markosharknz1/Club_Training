@@ -52,36 +52,36 @@
       <thead class="table-dark">
         <tr>
           <th>Name</th>
-          <th class="text-center" style="width:44px">Age</th>
-          <th>Session</th>
-          <th>Group</th>
+          <th>Membership</th>
+          <th>Last Session</th>
+          <th>Last Group</th>
           <th>Last Played</th>
-          <th>Guardian</th>
-          <th>Phone</th>
           <th style="width:90px"></th>
         </tr>
       </thead>
       <tbody>
         {% for p in players %}
-        {% set last_played = last_played_map.get(p.id) %}
+        {% set last = last_attendance_map.get(p.id) %}
         <tr {% if not p.active %}class="text-muted"{% endif %}>
           <td>
             <a href="/players/{{ p.id }}" class="fw-semibold text-decoration-none">{{ p.name }}</a>
             {% if not p.active %}<span class="badge bg-secondary ms-1">Inactive</span>{% endif %}
             {% if p.siblings %}<span class="badge bg-info text-dark ms-1">siblings</span>{% endif %}
           </td>
-          <td class="text-center">{{ p.age if p.age is not none else '—' }}</td>
-          <td>{{ p.default_session.name if p.default_session else '—' }}</td>
-          <td>{{ p.default_group.name   if p.default_group   else '—' }}</td>
-          <td>{{ last_played.strftime('%d %b %Y') if last_played else '—' }}</td>
-          <td>{{ p.guardian_name  or '—' }}</td>
-          <td>{{ p.guardian_phone or '—' }}</td>
+          <td>
+            <span class="badge {% if p.category == 'Junior' %}bg-info text-dark{% else %}bg-primary{% endif %}">
+              {{ p.category }}
+            </span>
+          </td>
+          <td>{{ last.session_name if last else '—' }}</td>
+          <td>{{ last.group_name if last and last.group_name else '' }}</td>
+          <td>{{ last.date.strftime('%d %b %Y') if last else '—' }}</td>
           <td class="text-end">
             <a href="/players/{{ p.id }}/edit" class="btn btn-outline-secondary btn-sm py-0 px-2">Edit</a>
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="8" class="text-center text-muted py-4">No players found.</td></tr>
+        <tr><td colspan="6" class="text-center text-muted py-4">No players found.</td></tr>
         {% endfor %}
       </tbody>
     </table>

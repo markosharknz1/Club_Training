@@ -152,6 +152,30 @@ own machine and demo to other club members (e.g. "Carol").
     `127.0.0.1` in a background thread, `pywebview` opens a native window pointed at it, with a
     browser-open fallback if `pywebview` isn't installed. Verified working (WebView2-backed window
     successfully loaded the app, confirmed via server logs during testing).
+12. **Vendor-change hardening** (the user called this "vital"): two upstream dependencies were
+    identified as breakage risks and fixed —
+    - **CDN dependencies removed.** Bootstrap CSS/JS and Chart.js were previously loaded from
+      `cdn.jsdelivr.net` on every page load — meaning the *entire UI* would break with no internet,
+      or if jsdelivr had an outage, or if that exact CDN version was ever pulled. They're now
+      vendored locally at `static/vendor/bootstrap/` and `static/vendor/chartjs/` (exact same
+      pinned versions: Bootstrap 5.3.3, Chart.js 4.4.2) and served via Flask's own `/static` route
+      (`{{ url_for('static', filename=...) }}` in `base.html`/`reports.html`). The app is now
+      genuinely offline-capable — no external network call happens on any page load. **If you ever
+      need to upgrade Bootstrap or Chart.js, re-download the new version's file into the same
+      `static/vendor/...` path and update the version number in this note** — don't reintroduce a
+      CDN `<script>`/`<link>` tag.
+    - **Python package versions pinned exactly** in `requirements.txt` (`flask==3.1.3`,
+      `flask-sqlalchemy==3.1.1`, `sqlalchemy==2.0.36`, `openpyxl==3.1.5`, `reportlab==4.5.1`,
+      `requests==2.32.3`, `pywebview==6.2.1`) instead of bare unpinned names. Previously, running
+      `install.bat` on a different machine or at a later date would silently pull whatever the
+      *latest* version of each package happened to be at that time — a future breaking major
+      release (e.g. a new SQLAlchemy or Flask major version) could have broken the app with no
+      warning. Now every install gets the exact versions this app was actually built and tested
+      against. **When intentionally upgrading a dependency, update the pin here and re-test the
+      whole app**, don't just bump it casually.
+    - Square's Terminal API calls already pin `'Square-Version': '2024-06-04'` in the request
+      headers (see `_square_headers()`), so Square can't silently change API behaviour under us
+      either — this predates this hardening pass but is the same category of protection.
 
 ## Known open items (not yet built — need user input before building)
 
