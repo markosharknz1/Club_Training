@@ -3,7 +3,7 @@ Badminton Club — junior session management
 Run:  python app.py
 """
 import calendar as _cal_mod
-import json, socket, threading, time, webbrowser
+import json, socket, sys, threading, time, webbrowser
 import requests
 from collections import defaultdict, OrderedDict
 from datetime import date, datetime, timedelta
@@ -1563,6 +1563,14 @@ def _wait_for_server(port, timeout=5):
 
 
 if __name__ == '__main__':
+    _tested_versions = ((3, 9), (3, 14))  # inclusive range this app has been tested against
+    if not (_tested_versions[0] <= sys.version_info[:2] <= _tested_versions[1]):
+        print(f'  Note: this app was built and tested on Python 3.12. You are running '
+              f'{sys.version_info[0]}.{sys.version_info[1]}, which is outside the tested range '
+              f'({_tested_versions[0][0]}.{_tested_versions[0][1]}–{_tested_versions[1][0]}.{_tested_versions[1][1]}).')
+        print('  The app will still try to start, but if something looks wrong, installing '
+              'Python 3.12 is the known-good fix.\n')
+
     app  = create_app()
     port = _free_port()
 

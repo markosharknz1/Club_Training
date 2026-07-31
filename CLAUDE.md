@@ -176,6 +176,34 @@ own machine and demo to other club members (e.g. "Carol").
     - Square's Terminal API calls already pin `'Square-Version': '2024-06-04'` in the request
       headers (see `_square_headers()`), so Square can't silently change API behaviour under us
       either — this predates this hardening pass but is the same category of protection.
+    - **Offline Python package installs.** `vendor_wheels/` holds prebuilt `.whl` files for every
+      pinned package *and all of their transitive dependencies* (28 wheels total, ~15MB, built via
+      `pip wheel -r requirements.txt -w vendor_wheels` — this correctly handles `proxy_tools`,
+      pywebview's one dependency that only ships as a source distribution, by building a wheel for
+      it locally). `install.bat` now tries `pip install --no-index --find-links=vendor_wheels -r
+      requirements.txt` first (zero internet needed) and only falls back to a normal
+      `pip install -r requirements.txt` (needs internet) if that fails — which it would if the
+      target machine's Python version doesn't match the platform-specific wheels (built against
+      cp312/win_amd64). Verified end-to-end: a completely fresh venv with `--no-index` (no PyPI
+      access at all) installed all 28 packages successfully and the app ran correctly against them.
+      **When bumping a pinned version, regenerate `vendor_wheels/` too**
+      (`pip wheel -r requirements.txt -w vendor_wheels`, after clearing the old contents) — an
+      out-of-date `vendor_wheels/` just means the fallback path kicks in, but the offline
+      install would still work, so it's for the maximum belt-and-braces from
+      `requirements.txt` itself.
+    - **Bundled WebView2 Runtime installer.** `pywebview` needs the Edge WebView2 Runtime, which
+      ships with Windows 10/11 by default — but on the off chance a target machine somehow lacks
+      it (e.g. a very stripped-down build), `vendor_installers/MicrosoftEdgeWebview2Setup.exe`
+      (Microsoft's official Evergreen Bootstrapper, ~1.6MB, downloaded from their documented
+      permalink `https://go.microsoft.com/fwlink/p/?LinkId=2124703`) is bundled. `install.bat`
+      checks the well-known WebView2 registry key
+      (`{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}` under `HKLM\...\EdgeUpdate\Clients\` or
+      `HKCU\...`) and silently runs the bundled installer only if the runtime isn't already
+      present.
+    - **Soft Python-version check** at the top of `app.py`'s `if __name__ == '__main__':` block —
+      warns (doesn't block) if running outside the tested range (3.9–3.14), pointing at Python
+      3.12 as the known-good version. Purely informational, for diagnosing "why doesn't it work on
+      this machine" rather than preventing startup.
 
 ## Known open items (not yet built — need user input before building)
 
