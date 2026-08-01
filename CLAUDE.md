@@ -204,6 +204,46 @@ own machine and demo to other club members (e.g. "Carol").
       warns (doesn't block) if running outside the tested range (3.9–3.14), pointing at Python
       3.12 as the known-good version. Purely informational, for diagnosing "why doesn't it work on
       this machine" rather than preventing startup.
+13. **Reports simplified to player counts, long-term trend focus.** The user found the original
+    Reports page (cash/card totals, a payment-type-by-month chart, a per-group-size chart) not
+    useful and flagged that comparing differently-sized groups on one chart is confusing. Rebuilt
+    around `_reports_data(months, session_filter)` (module-level helper, shared between the page
+    and its export so they never drift) — money is gone entirely, the only metric is player
+    check-in counts. One chart: total monthly check-ins over time (all sessions combined, or just
+    the filtered session — never multiple differently-sized series on the same chart, which is
+    exactly what was confusing before). Default period changed from 12 months to 24, plus an
+    "All time" option (`months=0`), since the user wants long-term/year-over-year comparison
+    ("is there more people this summer than last") rather than a short window. **New `/reports/
+    export` route** — a "↓ Download Excel" button exports the exact on-screen monthly + per-session
+    data as `.xlsx`, since the user was unsure the on-screen charts add value over raw numbers they
+    can pivot themselves. The original single-month detailed payment/coach reconciliation export
+    (`/export/excel`, linked from Settings → Export Data) is untouched — that's a different,
+    deliberately kept feature.
+    - **Bug fixed along the way** (pre-existing, not introduced by this change): the Reports
+      session filter (`SessionDate.query.join(SessionTemplate).filter_by(session_id=...)`) crashed
+      with a SQLAlchemy `InvalidRequestError` — `filter_by` after a `.join()` resolves against the
+      *last-joined* entity (`SessionTemplate`, which has no `session_id` column), not `SessionDate`
+      where that column actually lives. Fixed to an explicit `.filter(SessionDate.session_id ==
+      ...)`. **If you ever see this exact error again elsewhere, it's this same footgun** — always
+      use an explicit `.filter(Model.column == ...)` instead of `.filter_by()` on a query that has
+      joined another table.
+    - **Coaches sheet in the monthly Excel export was also fixed**: column headers were date-only
+      (`'01 Jul'`), so two sessions on the same day produced *duplicate, ambiguous column headers*
+      — impossible to tell which session a coach worked. Headers now read `'01 Jul - Sunday
+      Advanced - 9-1030'` (date + session name), wrapped and sized to stay readable. This is what
+      the user meant by "the coach export needs to be included in the month, and shown what
+      coaches, and how many sessions they were at" — the data was already there, the ambiguous
+      headers were the actual problem.
+14. **Sessions setup page** — removed the "Total kids checked in" / "Total collected" stat row
+    from each session card (added a couple of sessions ago, user decided they don't need it). Card
+    now shows just day/time, prices, and groups — the user called this "simple."
+15. **Medicare number removed entirely** from the player-facing UI — the field itself, and the
+    "not actually needed" framing, means it's gone from: Add/Edit Player forms, the player detail
+    page, the check-in page's right-click edit modal, the API get/save routes, and the Sports
+    Voucher PDF export's info table. The underlying `players.medicare_number` DB column and its
+    migration were **left in place** (unused, harmless) rather than dropped — this project's
+    established pattern is migrations only ever add columns, never remove them, to avoid risky
+    schema surgery on a real production SQLite file with no rollback story.
 
 ## Known open items (not yet built — need user input before building)
 

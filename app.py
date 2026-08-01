@@ -437,7 +437,6 @@ def create_app():
             p.address            = request.form.get('address', '').strip() or None
             p.own_email          = request.form.get('own_email', '').strip() or None
             p.own_phone          = request.form.get('own_phone', '').strip() or None
-            p.medicare_number    = request.form.get('medicare_number', '').strip() or None
             p.default_session_id = _int(request.form.get('session_id'))
             p.default_group_id   = _int(request.form.get('group_id'))
             p.notes              = request.form.get('notes', '').strip()
@@ -918,7 +917,6 @@ def create_app():
 
         info_data = [
             ['Player name:',        p.name],
-            ['Medicare number:',    p.medicare_number or '—'],
             ['Voucher date issued:', v.date_issued.strftime('%d %b %Y')],
             ['Voucher amount:',     f'${int(round(float(v.amount)))}'],
             ['Sessions total:',     str(v.sessions_total)],
@@ -1034,112 +1032,60 @@ def create_app():
 
     @app.route('/reports')
     def reports():
-        months         = request.args.get('months', 12, type=int)
+        months         = request.args.get('months', 24, type=int)
         session_filter = request.args.get('session_id', '')
-        start          = date.today() - timedelta(days=months * 30)
-
-        q = (SessionDate.query.join(SessionTemplate)
-             .filter(SessionDate.date >= start).order_by(SessionDate.date))
-        if session_filter:
-            try:
-                q = q.filter_by(session_id=int(session_filter))
-            except ValueError:
-                pass
-        dates = q.all()
-
-        # Attendance over time — one point per session date
-        palette = ['#1F4E79', '#28a745', '#ffc107', '#dc3545', '#17a2b8', '#6f42c1', '#fd7e14']
-        series  = {}
-        for sd in dates:
-            series.setdefault(sd.template.name, {})[sd.date.isoformat()] = sd.total_attending
-        all_chart_dates = sorted({sd.date.isoformat() for sd in dates})
-        att_datasets = [
-            {
-                'label':           name,
-                'data':            [dmap.get(d) for d in all_chart_dates],
-                'borderColor':     palette[i % len(palette)],
-                'backgroundColor': palette[i % len(palette)] + '33',
-                'tension': 0.3, 'spanGaps': True,
-            }
-            for i, (name, dmap) in enumerate(series.items())
-        ]
-
-        # Monthly payment breakdown
-        monthly     = defaultdict(lambda: defaultdict(int))
-        months_list = list(OrderedDict.fromkeys(sd.date.strftime('%b %Y') for sd in dates))
-        for sd in dates:
-            m = sd.date.strftime('%b %Y')
-            for a in sd.attendance:
-                monthly[m][a.payment_type] += 1
-
-        pcols = {'Cash': '#28a745', 'Card': '#0d6efd',
-                 'Voucher': '#ffc107', 'Visit Pass': '#0dcaf0', 'Free': '#6c757d'}
-        pay_datasets = [
-            {
-                'label':           pt,
-                'data':            [monthly[m].get(pt, 0) for m in months_list],
-                'backgroundColor': pcols.get(pt, '#999'),
-            }
-            for pt in PAYMENT_TYPES
-        ]
-
-        # Group sizes per session occurrence
-        all_groups = sorted({a.group.name for sd in dates for a in sd.attendance if a.group})
-        group_dates = [sd.date.isoformat() for sd in dates]
-        group_datasets = [
-            {
-                'label':           g,
-                'data':            [sum(1 for a in sd.attendance if a.group and a.group.name == g)
-                                    for sd in dates],
-                'backgroundColor': palette[i % len(palette)] + 'aa',
-                'borderColor':     palette[i % len(palette)],
-                'borderWidth': 1,
-            }
-            for i, g in enumerate(all_groups)
-        ]
-
-        # Totals
-        total_sessions = len(dates)
-        total_att      = sum(sd.total_attending for sd in dates)
-        total_cash     = sum(sd.total_cash for sd in dates)
-        total_card     = sum(sd.total_card for sd in dates)
-
-        pay_totals = defaultdict(lambda: {'count': 0, 'amount': 0.0})
-        for sd in dates:
-            for a in sd.attendance:
-                pay_totals[a.payment_type]['count']  += 1
-                pay_totals[a.payment_type]['amount'] += float(a.amount or 0)
-
-        session_summary = {}
-        for sd in dates:
-            sid = sd.session_id
-            if sid not in session_summary:
-                session_summary[sid] = {
-                    'name': sd.template.name, 'count': 0,
-                    'total_att': 0, 'total_cash': 0.0, 'total_card': 0.0,
-                }
-            session_summary[sid]['count']      += 1
-            session_summary[sid]['total_att']  += sd.total_attending
-            session_summary[sid]['total_cash'] += sd.total_cash
-            session_summary[sid]['total_card'] += sd.total_card
-        for v in session_summary.values():
-            v['avg'] = round(v['total_att'] / v['count'], 1) if v['count'] else 0
-
-        all_sessions = SessionTemplate.query.order_by(SessionTemplate.day_of_week).all()
+        data           = _reports_data(months, session_filter)
+        all_sessions   = SessionTemplate.query.order_by(SessionTemplate.day_of_week).all()
 
         return render_template('reports.html',
             months=months, session_filter=session_filter, all_sessions=all_sessions,
-            all_chart_dates=json.dumps(all_chart_dates),
-            att_datasets=json.dumps(att_datasets),
-            group_dates=json.dumps(group_dates),
-            group_datasets=json.dumps(group_datasets),
-            months_list=json.dumps(months_list),
-            pay_datasets=json.dumps(pay_datasets),
-            total_sessions=total_sessions, total_att=total_att,
-            total_cash=total_cash, total_card=total_card,
-            pay_totals=dict(pay_totals), session_summary=session_summary,
-            PAYMENT_TYPES=PAYMENT_TYPES, PAYMENT_COLORS=PAYMENT_COLORS,
+            monthly_labels=json.dumps([m['label'] for m in data['monthly_summary']]),
+            monthly_totals=json.dumps([m['total'] for m in data['monthly_summary']]),
+            monthly_summary=data['monthly_summary'],
+            session_summary=data['session_summary'],
+            total_sessions=data['total_sessions'], total_att=data['total_att'],
         )
+
+    @app.route('/reports/export')
+    def reports_export():
+        import io
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill
+        from flask import send_file
+
+        months         = request.args.get('months', 24, type=int)
+        session_filter = request.args.get('session_id', '')
+        data           = _reports_data(months, session_filter)
+
+        hdr_fill = PatternFill('solid', fgColor='1F4E79')
+        hdr_font = Font(color='FFFFFF', bold=True)
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Monthly Attendance'
+        ws.append(['Month', 'Total Check-ins', 'Sessions Run', 'Avg per Session'])
+        for cell in ws[1]:
+            cell.font = hdr_font; cell.fill = hdr_fill
+        for row in data['monthly_summary']:
+            ws.append([row['label'], row['total'], row['sessions'], row['avg']])
+        for col, width in zip('ABCD', (14, 16, 14, 16)):
+            ws.column_dimensions[col].width = width
+
+        ws2 = wb.create_sheet('Per Session')
+        ws2.append(['Session', 'Occurrences', 'Total Check-ins', 'Avg per Session'])
+        for cell in ws2[1]:
+            cell.font = hdr_font; cell.fill = hdr_fill
+        for row in data['session_summary'].values():
+            ws2.append([row['name'], row['count'], row['total_att'], row['avg']])
+        for col, width in zip('ABCD', (28, 14, 16, 16)):
+            ws2.column_dimensions[col].width = width
+
+        buf = io.BytesIO()
+        wb.save(buf); buf.seek(0)
+        club  = Setting.get('club_name', 'Club Training')
+        fname = f"{club.replace(' ', '_')}_Attendance_Trends.xlsx"
+        return send_file(buf, as_attachment=True, download_name=fname,
+                         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
     # ── Settings ─────────────────────────────────────────────────────
 
@@ -1278,16 +1224,21 @@ def create_app():
 
         # Sheet 4 — Coaches
         ws4 = wb.create_sheet('Coaches')
-        ws4.append(['Coach'] + [sd.date.strftime('%d %b') for sd in sds] + ['Total'])
+        ws4.append(['Coach'] + [f"{sd.date.strftime('%d %b')} - {sd.template.name}" for sd in sds]
+                   + ['Total Sessions'])
         for cell in ws4[1]:
-            cell.font = hdr_font; cell.fill = hdr_fill
+            cell.font = hdr_font; cell.fill = hdr_fill; cell.alignment = Alignment(wrap_text=True, vertical='top')
+        ws4.row_dimensions[1].height = 45
         for i, coach in enumerate(all_coaches):
             coached = {sd.id for sd in sds if coach in sd.coaches}
             ws4.append([coach.name]
-                       + ['✓' if sd.id in coached else '' for sd in sds]
+                       + ['Yes' if sd.id in coached else '' for sd in sds]
                        + [len(coached)])
             if i % 2:
                 for cell in ws4[ws4.max_row]: cell.fill = alt_fill
+        ws4.column_dimensions['A'].width = 20
+        for col_idx in range(2, len(sds) + 2):
+            ws4.column_dimensions[ws4.cell(row=1, column=col_idx).column_letter].width = 14
 
         buf = io.BytesIO()
         wb.save(buf); buf.seek(0)
@@ -1397,7 +1348,6 @@ def create_app():
             'address':       p.address or '',
             'own_email':     p.own_email or '',
             'own_phone':     p.own_phone or '',
-            'medicare_number': p.medicare_number or '',
             'notes':         p.notes or '',
         })
 
@@ -1416,7 +1366,6 @@ def create_app():
         p.address        = (data.get('address') or '').strip() or None
         p.own_email      = (data.get('own_email') or '').strip() or None
         p.own_phone      = (data.get('own_phone') or '').strip() or None
-        p.medicare_number = (data.get('medicare_number') or '').strip() or None
         p.notes         = (data.get('notes') or '').strip() or None
         dob_str = (data.get('dob') or '').strip()
         if dob_str:
@@ -1495,6 +1444,51 @@ def _player_field_settings():
         'senior': cat_cfg('senior', 18, 99, {
             'age': '1', 'address': '1', 'email': '1', 'parent_contact': '0', 'phone': '1',
         }),
+    }
+
+
+def _reports_data(months, session_filter):
+    """Shared attendance-trend data for the Reports page and its Excel export.
+    Player counts only — no money. `months` <= 0 means all time."""
+    start = date.today() - timedelta(days=months * 30) if months and months > 0 else date(2000, 1, 1)
+
+    q = (SessionDate.query.join(SessionTemplate)
+         .filter(SessionDate.date >= start).order_by(SessionDate.date))
+    if session_filter:
+        try:
+            q = q.filter(SessionDate.session_id == int(session_filter))
+        except ValueError:
+            pass
+    dates = q.all()
+
+    monthly = OrderedDict()
+    for sd in dates:
+        key = (sd.date.year, sd.date.month)
+        if key not in monthly:
+            monthly[key] = {'label': sd.date.strftime('%b %Y'), 'total': 0, 'sessions': 0}
+        monthly[key]['total']    += sd.total_attending
+        monthly[key]['sessions'] += 1
+    monthly_summary = []
+    for key in sorted(monthly.keys()):
+        row = monthly[key]
+        row['avg'] = round(row['total'] / row['sessions'], 1) if row['sessions'] else 0
+        monthly_summary.append(row)
+
+    session_summary = {}
+    for sd in dates:
+        sid = sd.session_id
+        if sid not in session_summary:
+            session_summary[sid] = {'name': sd.template.name, 'count': 0, 'total_att': 0}
+        session_summary[sid]['count']     += 1
+        session_summary[sid]['total_att'] += sd.total_attending
+    for v in session_summary.values():
+        v['avg'] = round(v['total_att'] / v['count'], 1) if v['count'] else 0
+
+    return {
+        'monthly_summary': monthly_summary,
+        'session_summary': session_summary,
+        'total_sessions':  len(dates),
+        'total_att':       sum(sd.total_attending for sd in dates),
     }
 
 

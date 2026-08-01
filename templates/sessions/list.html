@@ -72,17 +72,6 @@
         &nbsp;·&nbsp;
         {{ s.groups | selectattr('active') | list | length }} group{{ 's' if (s.groups|selectattr('active')|list|length) != 1 }}
       </div>
-
-      <div class="row g-2 mt-1 pt-2 border-top">
-        <div class="col-6">
-          <div class="text-muted small">Total kids checked in</div>
-          <div class="fw-semibold">{{ s.total_checkins }}</div>
-        </div>
-        <div class="col-6">
-          <div class="text-muted small">Total collected</div>
-          <div class="fw-semibold">{{ s.total_collected | round | int }}</div>
-        </div>
-      </div>
     </div>
   </div>
 </div>

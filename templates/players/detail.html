@@ -39,8 +39,6 @@
           <dd class="col-7">{{ player.default_group.name if player.default_group else '—' }}</dd>
           <dt class="col-5 text-muted">Total attended</dt>
           <dd class="col-7">{{ player.total_attended }} sessions</dd>
-          <dt class="col-5 text-muted">Medicare number</dt>
-          <dd class="col-7">{{ player.medicare_number or '—' }}</dd>
           {% if player.notes %}
           <dt class="col-5 text-muted">Notes</dt>
           <dd class="col-7">{{ player.notes }}</dd>

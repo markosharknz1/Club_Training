@@ -4,8 +4,8 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <h5 class="mb-0 fw-bold">Reports</h5>
-  <a href="/export/excel?month={{ today.strftime('%Y-%m') }}"
-     class="btn btn-outline-secondary btn-sm">↓ Export Excel (this month)</a>
+  <a href="/reports/export?months={{ months }}&session_id={{ session_filter }}"
+     class="btn btn-outline-secondary btn-sm">↓ Download Excel</a>
 </div>
 
 {# Filter bar #}
@@ -24,120 +24,75 @@
   <div class="col-auto">
     <label class="form-label small fw-semibold mb-1">Period</label>
     <select name="months" class="form-select form-select-sm" onchange="this.form.submit()">
-      <option value="3"  {% if months==3  %}selected{% endif %}>Last 3 months</option>
       <option value="6"  {% if months==6  %}selected{% endif %}>Last 6 months</option>
       <option value="12" {% if months==12 %}selected{% endif %}>Last year</option>
       <option value="24" {% if months==24 %}selected{% endif %}>Last 2 years</option>
       <option value="36" {% if months==36 %}selected{% endif %}>Last 3 years</option>
+      <option value="0"  {% if months==0  %}selected{% endif %}>All time</option>
     </select>
   </div>
 </form>
 
-{# Summary stat cards #}
 <div class="row g-3 mb-4">
-  <div class="col-6 col-md-3">
+  <div class="col-6 col-md-4">
     <div class="card border-0 shadow-sm text-center">
       <div class="card-body py-3">
         <div class="fs-2 fw-bold">{{ total_sessions }}</div>
-        <div class="text-muted small">Sessions</div>
+        <div class="text-muted small">Sessions Run</div>
       </div>
     </div>
   </div>
-  <div class="col-6 col-md-3">
+  <div class="col-6 col-md-4">
     <div class="card border-0 shadow-sm text-center">
       <div class="card-body py-3">
         <div class="fs-2 fw-bold">{{ total_att }}</div>
-        <div class="text-muted small">Total check-ins</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-6 col-md-3">
-    <div class="card border-0 shadow-sm text-center">
-      <div class="card-body py-3">
-        <div class="fs-2 fw-bold text-success">{{ total_cash | round | int }}</div>
-        <div class="text-muted small">Cash</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-6 col-md-3">
-    <div class="card border-0 shadow-sm text-center">
-      <div class="card-body py-3">
-        <div class="fs-2 fw-bold text-primary">{{ total_card | round | int }}</div>
-        <div class="text-muted small">Card</div>
+        <div class="text-muted small">Total Check-ins</div>
       </div>
     </div>
   </div>
 </div>
 
-{# Attendance over time chart #}
 {% if total_sessions %}
 <div class="card shadow-sm border-0 mb-4">
-  <div class="card-header fw-semibold">Attendance Over Time</div>
+  <div class="card-header fw-semibold">Monthly Attendance</div>
   <div class="card-body">
-    <canvas id="attChart" height="90"></canvas>
+    <canvas id="monthlyChart" height="90"></canvas>
+  </div>
+  <div class="text-muted small px-3 pb-3">
+    {% if session_filter %}Showing the selected session only.{% else %}Total across all sessions combined, per month — pick a session above to see just that one.{% endif %}
   </div>
 </div>
 
 <div class="row g-3 mb-4">
-  {# Group sizes chart #}
   <div class="col-lg-6">
-    <div class="card shadow-sm border-0 h-100">
-      <div class="card-header fw-semibold">Group Sizes</div>
-      <div class="card-body">
-        <canvas id="groupChart" height="200"></canvas>
-      </div>
-    </div>
-  </div>
-
-  {# Payment mix chart #}
-  <div class="col-lg-6">
-    <div class="card shadow-sm border-0 h-100">
-      <div class="card-header fw-semibold">Payment Types by Month</div>
-      <div class="card-body">
-        <canvas id="payChart" height="200"></canvas>
-      </div>
-    </div>
-  </div>
-</div>
-
-{# Payment type table #}
-<div class="row g-3 mb-4">
-  <div class="col-md-5">
     <div class="card shadow-sm border-0">
-      <div class="card-header fw-semibold">Payment Summary</div>
+      <div class="card-header fw-semibold">Monthly Breakdown</div>
       <div class="card-body p-0">
         <table class="table table-sm mb-0">
           <thead class="table-light">
-            <tr><th>Type</th><th class="text-center">Count</th><th class="text-end">Amount</th></tr>
+            <tr>
+              <th>Month</th>
+              <th class="text-center">Check-ins</th>
+              <th class="text-center">Sessions</th>
+              <th class="text-center">Avg / Session</th>
+            </tr>
           </thead>
           <tbody>
-            {% for pt in PAYMENT_TYPES %}
-            {% set row = pay_totals.get(pt) %}
-            {% if row and row.count %}
+            {% for row in monthly_summary %}
             <tr>
-              <td><span class="badge bg-{{ PAYMENT_COLORS.get(pt,'secondary') }}">{{ pt }}</span></td>
-              <td class="text-center fw-semibold">{{ row.count }}</td>
-              <td class="text-end text-muted small">
-                {% if pt in ['Cash','Card'] %}{{ row.amount | round | int }}{% else %}—{% endif %}
-              </td>
+              <td class="fw-semibold">{{ row.label }}</td>
+              <td class="text-center">{{ row.total }}</td>
+              <td class="text-center">{{ row.sessions }}</td>
+              <td class="text-center">{{ row.avg }}</td>
             </tr>
-            {% endif %}
             {% endfor %}
           </tbody>
-          <tfoot class="table-light fw-bold">
-            <tr>
-              <td>Cash + Card total</td>
-              <td></td>
-              <td class="text-end">{{ (total_cash + total_card) | round | int }}</td>
-            </tr>
-          </tfoot>
         </table>
       </div>
     </div>
   </div>
 
-  {# Per-session summary #}
-  <div class="col-md-7">
+  <div class="col-lg-6">
     <div class="card shadow-sm border-0">
       <div class="card-header fw-semibold">Per Session</div>
       <div class="card-body p-0">
@@ -146,9 +101,8 @@
             <tr>
               <th>Session</th>
               <th class="text-center">Occurrences</th>
-              <th class="text-center">Avg players</th>
-              <th class="text-end">Cash</th>
-              <th class="text-end">Card</th>
+              <th class="text-center">Total Check-ins</th>
+              <th class="text-center">Avg Players</th>
             </tr>
           </thead>
           <tbody>
@@ -156,12 +110,11 @@
             <tr>
               <td class="fw-semibold">{{ row.name }}</td>
               <td class="text-center">{{ row.count }}</td>
+              <td class="text-center">{{ row.total_att }}</td>
               <td class="text-center">{{ row.avg }}</td>
-              <td class="text-end text-success">{{ row.total_cash | round | int }}</td>
-              <td class="text-end text-primary">{{ row.total_card | round | int }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="5" class="text-center text-muted py-3">No data.</td></tr>
+            <tr><td colspan="4" class="text-center text-muted py-3">No data.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -178,47 +131,30 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.min.js') }}"></script>
 <script>
-const attDates    = {{ all_chart_dates | safe }};
-const attDatasets = {{ att_datasets    | safe }};
-const groupDates  = {{ group_dates     | safe }};
-const groupDs     = {{ group_datasets  | safe }};
-const monthsList  = {{ months_list     | safe }};
-const payDs       = {{ pay_datasets    | safe }};
+const monthlyLabels = {{ monthly_labels | safe }};
+const monthlyTotals = {{ monthly_totals | safe }};
 
 Chart.defaults.font.family = 'system-ui, sans-serif';
 Chart.defaults.font.size   = 12;
 
 {% if total_sessions %}
-// Attendance over time
-new Chart(document.getElementById('attChart'), {
+new Chart(document.getElementById('monthlyChart'), {
   type: 'line',
-  data: { labels: attDates, datasets: attDatasets },
+  data: {
+    labels: monthlyLabels,
+    datasets: [{
+      label: 'Total check-ins',
+      data: monthlyTotals,
+      borderColor: '#1F4E79',
+      backgroundColor: '#1F4E7933',
+      tension: 0.3,
+      fill: true,
+    }],
+  },
   options: {
-    responsive: true, interaction: { mode: 'index' },
-    plugins: { legend: { position: 'top' } },
+    responsive: true,
+    plugins: { legend: { display: false } },
     scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
-  }
-});
-
-// Group sizes (bar)
-new Chart(document.getElementById('groupChart'), {
-  type: 'bar',
-  data: { labels: groupDates, datasets: groupDs },
-  options: {
-    responsive: true,
-    plugins: { legend: { position: 'top' } },
-    scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } },
-  }
-});
-
-// Payment types (stacked bar by month)
-new Chart(document.getElementById('payChart'), {
-  type: 'bar',
-  data: { labels: monthsList, datasets: payDs },
-  options: {
-    responsive: true,
-    plugins: { legend: { position: 'top' } },
-    scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } },
   }
 });
 {% endif %}

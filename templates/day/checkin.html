@@ -176,10 +176,6 @@
           </div>
         </div>
         <div class="mb-3">
-          <label class="form-label fw-semibold">Medicare number</label>
-          <input type="text" id="edit-medicare-number" class="form-control" autocomplete="off" placeholder="Optional">
-        </div>
-        <div class="mb-3">
           <label class="form-label fw-semibold">Notes</label>
           <textarea id="edit-notes" class="form-control" rows="2"></textarea>
         </div>
@@ -939,7 +935,6 @@ function showPlayerInfo(e, row) {
       document.getElementById('edit-guardian-name').value  = p.guardian_name;
       document.getElementById('edit-guardian-phone').value = p.guardian_phone;
       document.getElementById('edit-guardian-email').value = p.guardian_email;
-      document.getElementById('edit-medicare-number').value = p.medicare_number;
       document.getElementById('edit-notes').value          = p.notes;
       document.getElementById('edit-player-error').classList.add('d-none');
       bootstrap.Modal.getOrCreateInstance(document.getElementById('editPlayerModal')).show();
@@ -965,7 +960,6 @@ function confirmEditPlayer() {
       guardian_name:  document.getElementById('edit-guardian-name').value.trim(),
       guardian_phone: document.getElementById('edit-guardian-phone').value.trim(),
       guardian_email: document.getElementById('edit-guardian-email').value.trim(),
-      medicare_number: document.getElementById('edit-medicare-number').value.trim(),
       notes:          document.getElementById('edit-notes').value.trim(),
     }),
   }).then(r => r.json()).then(data => {
