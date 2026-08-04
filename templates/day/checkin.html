@@ -8,7 +8,10 @@
     <h5 class="mb-0 fw-bold">Check In Players</h5>
     <div class="text-muted small">{{ d.strftime('%A, %d %B %Y') }}</div>
   </div>
-  <a href="/day/{{ d.isoformat() }}" class="btn btn-outline-secondary btn-sm">← Day</a>
+  <div class="d-flex gap-2">
+    <a href="/day/{{ d.isoformat() }}/summary" class="btn btn-primary btn-sm">📋 Day Summary</a>
+    <a href="/day/{{ d.isoformat() }}" class="btn btn-outline-secondary btn-sm">← Day</a>
+  </div>
 </div>
 
 {# ── Open sessions summary ────────────────────────────────────────── #}
@@ -708,7 +711,7 @@ function openAddPlayer() {
   }, 300);
 }
 
-function confirmAddPlayer() {
+function confirmAddPlayer(force) {
   const name          = document.getElementById('new-player-name').value.trim();
   const age           = parseInt(document.getElementById('new-player-age').value) || null;
   const guardianName  = document.getElementById('new-guardian-name').value.trim();
@@ -724,9 +727,15 @@ function confirmAddPlayer() {
   fetch('/api/player/quick-add', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({name, age, guardian_name: guardianName, guardian_phone: guardianPhone}),
+    body: JSON.stringify({name, age, guardian_name: guardianName, guardian_phone: guardianPhone, force: !!force}),
   }).then(r => r.json()).then(data => {
     if (!data.ok) {
+      if (data.duplicate) {
+        if (confirm(data.error + ' Add them again anyway as a separate player?')) {
+          confirmAddPlayer(true);
+        }
+        return;
+      }
       errEl.textContent = data.error;
       errEl.classList.remove('d-none');
       return;

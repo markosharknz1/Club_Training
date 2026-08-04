@@ -10,6 +10,30 @@
   </div>
 </div>
 
+{# Long-absent players prompt #}
+{% if stale_players %}
+<div class="alert alert-warning">
+  <div class="fw-semibold mb-1">
+    {{ stale_players | length }} player{{ 's' if stale_players|length != 1 }} haven't attended in over a year:
+  </div>
+  <div class="small mb-2">
+    {% for p, last_date in stale_players %}
+    <span class="badge bg-light text-dark border me-1 mb-1">
+      {{ p.name }}{% if last_date %} <span class="text-muted">(last {{ last_date.strftime('%b %Y') }})</span>
+      {% else %} <span class="text-muted">(never attended)</span>{% endif %}
+    </span>
+    {% endfor %}
+  </div>
+  <form method="post" action="/players/mark-inactive" class="d-inline"
+        onsubmit="return confirm('Mark all {{ stale_players | length }} players inactive? They keep their history and can be reactivated any time.')">
+    {% for p, last_date in stale_players %}
+    <input type="hidden" name="player_ids" value="{{ p.id }}">
+    {% endfor %}
+    <button type="submit" class="btn btn-warning btn-sm">Mark all inactive</button>
+  </form>
+</div>
+{% endif %}
+
 {# Filter bar #}
 <form method="get" class="card shadow-sm border-0 mb-3">
   <div class="card-body py-2 d-flex flex-wrap gap-2 align-items-end">
@@ -93,7 +117,7 @@
 <div class="modal fade" id="addModal" tabindex="-1">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
-      <form method="post" action="/players/add">
+      <form method="post" action="/players/add" id="add-player-form">
         <div class="modal-header bg-success text-white">
           <h5 class="modal-title">Add Player</h5>
           <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
@@ -190,6 +214,18 @@
 {% block scripts %}
 <script>
 const FIELD_CFG = {{ field_cfg | tojson }};
+const ALL_PLAYER_NAMES = new Set({{ all_player_names | map('lower') | list | tojson }});
+
+// Soft duplicate warning when adding a player whose name already exists
+document.getElementById('add-player-form').addEventListener('submit', function(e) {
+  const nameInput = this.querySelector('input[name="name"]');
+  const name = (nameInput.value || '').trim();
+  if (name && ALL_PLAYER_NAMES.has(name.toLowerCase())) {
+    if (!confirm(`"${name}" already exists in the player database. Add them again anyway as a separate player?`)) {
+      e.preventDefault();
+    }
+  }
+});
 
 // Show/hide optional fields based on selected Junior/Senior category
 function applyFieldVisibility(prefix, category) {

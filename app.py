@@ -3,7 +3,7 @@ Badminton Club — junior session management
 Run:  python app.py
 """
 import calendar as _cal_mod
-import json, socket, sys, threading, time, webbrowser
+import glob, json, os, shutil, socket, sys, threading, time, webbrowser
 import requests
 from collections import defaultdict, OrderedDict
 from datetime import date, datetime, timedelta
@@ -20,7 +20,27 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
 
 # ─── App factory ────────────────────────────────────────────────────
 
+def _backup_database(keep=30):
+    """Daily safety copy of the SQLite file into backups/, keeping the newest `keep`.
+    Runs before the app touches the database, so even a bad migration can't damage
+    a file that hasn't been backed up first."""
+    if not os.path.exists(config.DB_PATH):
+        return
+    backup_dir = os.path.join(config.BASE_DIR, 'backups')
+    os.makedirs(backup_dir, exist_ok=True)
+    dest = os.path.join(backup_dir, f'badminton_{date.today().isoformat()}.db')
+    if not os.path.exists(dest):
+        shutil.copy2(config.DB_PATH, dest)
+    old_backups = sorted(glob.glob(os.path.join(backup_dir, 'badminton_*.db')))
+    for old in old_backups[:-keep]:
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+
+
 def create_app():
+    _backup_database()
     app = Flask(__name__)
     app.secret_key = 'bc-club-local-2025'
     app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{config.DB_PATH}'
@@ -213,6 +233,40 @@ def create_app():
         flash(f'Day reset — all sessions for {d.strftime("%d %b %Y")} deleted.', 'warning')
         return redirect(url_for('day_plan', date_iso=date_iso))
 
+    @app.route('/day/<date_iso>/summary')
+    def day_summary(date_iso):
+        """End-of-day reconciliation: kids, money to count, vouchers, coaches."""
+        try:
+            d = date.fromisoformat(date_iso)
+        except ValueError:
+            return redirect(url_for('home'))
+
+        session_dates = (SessionDate.query.filter_by(date=d)
+                         .order_by(SessionDate.session_id).all())
+
+        # Coach → list of session names they coached today
+        coach_map = OrderedDict()
+        for sd in session_dates:
+            for c in sd.coaches:
+                coach_map.setdefault(c.name, []).append(sd.template.name)
+
+        day_totals = {
+            'kids':  sum(sd.total_attending for sd in session_dates),
+            'cash':  sum(sd.total_cash for sd in session_dates),
+            'card':  sum(sd.total_card for sd in session_dates),
+            'by_type': defaultdict(int),
+        }
+        for sd in session_dates:
+            for pt, cnt in sd.payment_summary.items():
+                day_totals['by_type'][pt] += cnt
+        day_totals['by_type'] = dict(day_totals['by_type'])
+
+        return render_template('day/summary.html',
+                               d=d, session_dates=session_dates,
+                               coach_map=coach_map, day_totals=day_totals,
+                               PAYMENT_TYPES=PAYMENT_TYPES,
+                               PAYMENT_COLORS=PAYMENT_COLORS)
+
     # ── Calendar ──────────────────────────────────────────────────────
 
     @app.route('/calendar')
@@ -286,13 +340,45 @@ def create_app():
                     'group_name':   a.group.name if a.group else None,
                 }
 
+        # For the Add Player duplicate warning (includes inactive players)
+        all_player_names = [n for (n,) in db.session.query(Player.name).all()]
+
+        # Active players not seen in over a year (never-attended players count
+        # from when they were added) — offered for bulk mark-inactive.
+        cutoff = date.today() - timedelta(days=365)
+        stale_players = []
+        for p in Player.query.filter_by(active=True).all():
+            last = last_attendance_map.get(p.id)
+            if last:
+                if last['date'] < cutoff:
+                    stale_players.append((p, last['date']))
+            elif p.created_at and p.created_at.date() < cutoff:
+                stale_players.append((p, None))
+        stale_players.sort(key=lambda t: t[0].name.lower())
+
         return render_template('players/list.html',
                                players=player_list, sessions=sessions, all_groups=all_groups,
                                all_active_players=all_active_players,
+                               all_player_names=all_player_names,
+                               stale_players=stale_players,
                                last_attendance_map=last_attendance_map,
                                field_cfg=_player_field_settings(),
                                q=q, session_id=session_id, group_id=group_id,
                                show_inactive=show_inactive)
+
+    @app.route('/players/mark-inactive', methods=['POST'])
+    def players_mark_inactive():
+        """Bulk-deactivate players who haven't attended in over a year."""
+        ids = [int(x) for x in request.form.getlist('player_ids') if x.isdigit()]
+        count = 0
+        for p in Player.query.filter(Player.id.in_(ids)).all() if ids else []:
+            if p.active:
+                p.active = False
+                count += 1
+        db.session.commit()
+        flash(f'{count} player{"s" if count != 1 else ""} marked inactive. '
+              'They keep their history and can be reactivated any time via Edit.', 'success')
+        return redirect(url_for('players'))
 
     @app.route('/players/add', methods=['POST'])
     def players_add():
@@ -351,12 +437,18 @@ def create_app():
                         break
 
             added, skipped = 0, 0
+            duplicates = []
+            existing_names = {n.lower() for (n,) in db.session.query(Player.name).all()}
             today = date.today()
             for row in reader:
                 name = (row.get(col.get('name'), '') or '').strip() if col.get('name') else ''
                 if not name:
                     skipped += 1
                     continue
+                if name.lower() in existing_names:
+                    duplicates.append(name)
+                    continue
+                existing_names.add(name.lower())
 
                 dob = None
                 age_str = (row.get(col.get('age'), '') or '').strip() if col.get('age') else ''
@@ -384,9 +476,14 @@ def create_app():
                 added += 1
 
             db.session.commit()
-            flash(f'{added} player{"s" if added != 1 else ""} imported.'
-                  + (f' {skipped} row{"s" if skipped != 1 else ""} skipped (missing name).' if skipped else ''),
-                  'success' if added else 'warning')
+            msg = f'{added} player{"s" if added != 1 else ""} imported.'
+            if skipped:
+                msg += f' {skipped} row{"s" if skipped != 1 else ""} skipped (missing name).'
+            if duplicates:
+                shown = ', '.join(duplicates[:8]) + ('…' if len(duplicates) > 8 else '')
+                msg += (f' {len(duplicates)} skipped as already in the database: {shown} '
+                        '(add them individually via + Add Player if they really are different people).')
+            flash(msg, 'success' if added else 'warning')
             return redirect(url_for('players'))
 
         return render_template('players/import.html')
@@ -1395,6 +1492,12 @@ def create_app():
         name = (data.get('name') or '').strip()
         if not name:
             return jsonify(ok=False, error='Name is required.')
+        if not data.get('force'):
+            existing = Player.query.filter(db.func.lower(Player.name) == name.lower()).first()
+            if existing:
+                status = 'an active' if existing.active else 'an inactive'
+                return jsonify(ok=False, duplicate=True,
+                               error=f'"{existing.name}" already exists as {status} player.')
         dob = None
         age = data.get('age')
         if age:

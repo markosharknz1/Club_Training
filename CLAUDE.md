@@ -245,6 +245,33 @@ own machine and demo to other club members (e.g. "Carol").
     established pattern is migrations only ever add columns, never remove them, to avoid risky
     schema surgery on a real production SQLite file with no rollback story.
 
+16. **Automatic database backups.** `_backup_database()` in `app.py` runs at the very top of
+    `create_app()` — *before* `db.init_app`/migrations, so even a bad migration can never damage
+    a file that wasn't backed up first. One copy per day into `backups/badminton_YYYY-MM-DD.db`,
+    keeping the newest 30. `backups/` is gitignored (personal data, same as the live DB). Restore
+    = close the app, copy a backup file over `badminton.db`, restart. Off-machine safety (USB
+    copy) is still on the user.
+17. **End-of-day summary** (`/day/<date>/summary`, `templates/day/summary.html`) — the
+    reconciliation view from the original spec: day totals (kids, cash-to-count, card, voucher
+    sessions), a per-session table with payment mix, and a **Coaches table (coach → which
+    sessions they coached + count)**, per explicit request. Print button with print-friendly
+    header (`d-print-none` / `d-print-block`). Shortcut button **"📋 Day Summary" lives on the
+    check-in screen header** — the user asked for it there specifically, for easy access at
+    pack-up time. Note: this page deliberately DOES show money (cash to count against the till)
+    even though Reports doesn't — reconciliation vs trend-reporting are different jobs.
+18. **Duplicate-player protection** (soft warnings, never hard blocks — same-name players are
+    legitimately possible): Add Player modal on the Players page checks the typed name against
+    every existing player (incl. inactive) client-side and asks confirm(); the check-in page's
+    quick-add API returns `duplicate: true` unless `force` is sent, and the client confirms then
+    retries with force; CSV import silently *skips* rows whose name already exists (in the DB or
+    earlier in the same file) and lists them in the result message, pointing at + Add Player for
+    genuine same-name cases.
+19. **Long-absent players prompt** — on the Players page, a warning banner lists active players
+    whose last attendance is **over a year ago** (user chose 1 year over my suggested 6 months;
+    never-attended players count from their `created_at`), with a one-click "Mark all inactive"
+    bulk action (`POST /players/mark-inactive`). Nothing is automatic — it only ever *offers*.
+    Inactive players keep all history and can be reactivated via Edit.
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

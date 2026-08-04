@@ -1,0 +1,154 @@
+{% extends 'base.html' %}
+{% block title %}Day Summary — {{ d.strftime('%a %d %b') }} — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2 d-print-none">
+  <div>
+    <h5 class="mb-0 fw-bold">End of Day Summary</h5>
+    <div class="text-muted small">{{ d.strftime('%A, %d %B %Y') }}</div>
+  </div>
+  <div class="d-flex gap-2">
+    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="window.print()">🖨 Print</button>
+    <a href="/day/{{ d.isoformat() }}/checkin" class="btn btn-outline-secondary btn-sm">← Check In</a>
+    <a href="/day/{{ d.isoformat() }}" class="btn btn-outline-secondary btn-sm">← Day</a>
+  </div>
+</div>
+
+{# Print-only header #}
+<div class="d-none d-print-block mb-3">
+  <h5 class="fw-bold mb-0">{{ club_name }} — End of Day Summary</h5>
+  <div class="text-muted">{{ d.strftime('%A, %d %B %Y') }}</div>
+</div>
+
+{% if not session_dates %}
+<div class="alert alert-info">No sessions were run on this day.</div>
+{% else %}
+
+{# ── Day totals ───────────────────────────────────────────────────── #}
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold">{{ day_totals.kids }}</div>
+        <div class="text-muted small">Kids Checked In</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-success">{{ day_totals.cash | round | int }}</div>
+        <div class="text-muted small">Cash to Count</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-primary">{{ day_totals.card | round | int }}</div>
+        <div class="text-muted small">Card Payments</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-warning">{{ day_totals.by_type.get('Sports Voucher', 0) }}</div>
+        <div class="text-muted small">Voucher Sessions</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Per session ──────────────────────────────────────────────────── #}
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-header fw-semibold">Sessions</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0" style="font-size:.9rem">
+      <thead class="table-dark">
+        <tr>
+          <th>Session</th>
+          <th class="text-center">Kids</th>
+          <th class="text-end">Cash</th>
+          <th class="text-end">Card</th>
+          <th>Payment Mix</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sd in session_dates %}
+        <tr>
+          <td class="fw-semibold">{{ sd.template.name }}
+            <span class="text-muted fw-normal small">{{ sd.template.start_time }}–{{ sd.template.end_time }}</span>
+          </td>
+          <td class="text-center">{{ sd.total_attending }}</td>
+          <td class="text-end">{{ sd.total_cash | round | int }}</td>
+          <td class="text-end">{{ sd.total_card | round | int }}</td>
+          <td>
+            <div class="d-flex gap-1 flex-wrap">
+              {% for pt, cnt in sd.payment_summary.items() %}
+              <span class="badge bg-{{ PAYMENT_COLORS.get(pt,'secondary') }}" style="font-size:.65rem">
+                {{ cnt }} {{ pt }}
+              </span>
+              {% endfor %}
+            </div>
+          </td>
+          <td>
+            {% if sd.status == 'open' %}
+            <span class="badge bg-success">Open</span>
+            {% else %}
+            <span class="badge bg-secondary">Closed</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot class="table-light fw-bold">
+        <tr>
+          <td>Total</td>
+          <td class="text-center">{{ day_totals.kids }}</td>
+          <td class="text-end">{{ day_totals.cash | round | int }}</td>
+          <td class="text-end">{{ day_totals.card | round | int }}</td>
+          <td colspan="2"></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+
+{# ── Coaches ──────────────────────────────────────────────────────── #}
+<div class="card shadow-sm border-0 mb-4" style="max-width:640px">
+  <div class="card-header fw-semibold">Coaches</div>
+  {% if coach_map %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0" style="font-size:.9rem">
+      <thead class="table-dark">
+        <tr>
+          <th>Coach</th>
+          <th>Sessions Coached</th>
+          <th class="text-center">Count</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for name, sessions in coach_map.items() %}
+        <tr>
+          <td class="fw-semibold">{{ name }}</td>
+          <td>{{ sessions | join(', ') }}</td>
+          <td class="text-center">{{ sessions | length }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body py-3">
+    <p class="text-muted small mb-0">No coaches recorded for this day.
+      <span class="d-print-none">Set them on the <a href="/day/{{ d.isoformat() }}">Day page</a> under "Coaches Present".</span>
+    </p>
+  </div>
+  {% endif %}
+</div>
+
+{% endif %}
+
+{% endblock %}
