@@ -298,6 +298,25 @@ own machine and demo to other club members (e.g. "Carol").
   link), ask via targeted multiple-choice questions rather than guessing; this user has been happy
   to answer focused questions like that.
 
+## Remote work (claude.ai/code cloud sessions)
+
+The user also works on this project remotely via Claude Code on the web, where sessions run in a
+Linux cloud sandbox cloned from GitHub. Rules for those sessions:
+
+- **The real database is not in the repo and never will be** (kids' personal data). The app
+  auto-creates an empty `badminton.db` on first run. For realistic testing, run
+  `python seed_demo_data.py` first — it builds ~24 fictional players, 3 sessions, coaches,
+  vouchers, and ~26 weeks of attendance history. It **refuses to run** if the database already
+  contains any data, so it can never pollute a real DB; to re-seed, delete `badminton.db` first.
+- **Push to a branch, not `master`.** Remote changes can't be verified against the real database
+  or the real Windows machine, so they're "proposed until the user pulls and runs them at home."
+  The user merges (or asks for a merge) and then `git pull`s in `C:\Club_Training`.
+- **Verify with the Flask test client** (same as local practice) — `pywebview` won't open a
+  window in a sandbox, and that's fine; the entry-point fallback and all routes work headless.
+- **Can't be tested remotely** (write the code, flag it for at-home verification): the pywebview
+  desktop window itself, `install.bat`/WebView2 behaviour, Square Terminal hardware, printing.
+- Linux is case-sensitive and uses `/` paths — the app code is already portable, keep it that way.
+
 ## Resuming after a context reset
 
 1. `git log --oneline -10` and `git status` in `C:\Club_Training` to see the latest committed
