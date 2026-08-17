@@ -306,6 +306,26 @@ own machine and demo to other club members (e.g. "Carol").
       please check". Verified against the real files: 165/165 players, 30/36 vouchers, the 6
       unmatched genuinely absent from the juniors list.
 
+22. **Standalone .exe build (PyInstaller).** The user asked to "install all its dependencies as a
+    PWA" — clarified to mean *one-click install on any Windows PC with nothing else needed*. A
+    PWA can't do that (browser-side only, can't carry the Python server), so the agreed solution
+    is a PyInstaller bundle: run **`build_exe.bat`** → `dist\Club_Training\` (~79MB folder) with
+    `Club_Training.exe` inside — Python + every dependency baked in. Hand the whole folder to
+    someone (zip/USB); double-click the exe, done. Key mechanics: `_resource_dir()` in `app.py`
+    points Flask's `template_folder`/`static_folder` at `sys._MEIPASS` when frozen, while the
+    database + `backups/` stay next to the exe via `config.BASE_DIR`'s existing `sys.frozen`
+    branch — so bundled assets and persistent data are cleanly separated. Hidden imports
+    `webview.platforms.edgechromium`/`.winforms` are required for pywebview. `build/`, `dist/`,
+    `*.spec` are gitignored. Verified end-to-end: built exe launched its own window, served
+    pages and bundled static assets, and created a fresh DB beside itself. To ship real club
+    data with it, copy `badminton.db` into the folder next to the exe. Rebuild after any code
+    change — the exe is a frozen snapshot, it does not pick up edits to the .py files.
+    **App icon:** `static/icon.ico` (multi-size 16–256px, shuttlecock on the navbar navy,
+    generated programmatically with Pillow — regeneration code is in the session that added it;
+    tweak by redrawing at 512px and re-saving with `sizes=[...]`). Baked into the exe via
+    `--icon` in `build_exe.bat`; for a shortcut to `run.bat` on the dev machine, point the
+    shortcut's Change Icon dialog at that file.
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

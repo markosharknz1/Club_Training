@@ -9,6 +9,11 @@ __pycache__/
 *.pyc
 *.pyo
 
+# PyInstaller build output
+build/
+dist/
+*.spec
+
 # Virtual environments
 venv/
 .venv/

@@ -39,9 +39,22 @@ def _backup_database(keep=30):
             pass
 
 
+def _resource_dir():
+    """Where bundled read-only assets (templates/, static/) live. In a
+    PyInstaller build they're unpacked to sys._MEIPASS; in normal runs
+    they sit next to this file. The database is separate — it always
+    lives next to the exe/script (config.BASE_DIR) so data persists."""
+    if getattr(sys, 'frozen', False):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+
 def create_app():
     _backup_database()
-    app = Flask(__name__)
+    res = _resource_dir()
+    app = Flask(__name__,
+                template_folder=os.path.join(res, 'templates'),
+                static_folder=os.path.join(res, 'static'))
     app.secret_key = 'bc-club-local-2025'
     app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{config.DB_PATH}'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
