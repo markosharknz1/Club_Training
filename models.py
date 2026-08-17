@@ -231,6 +231,7 @@ class Voucher(db.Model):
     __tablename__ = 'vouchers'
     id             = db.Column(db.Integer, primary_key=True)
     player_id      = db.Column(db.Integer, db.ForeignKey('players.id'), nullable=False)
+    voucher_number = db.Column(db.String(50))
     amount         = db.Column(db.Numeric(8, 2), nullable=False, default=DEFAULT_VOUCHER_AMOUNT)
     sessions_total = db.Column(db.Integer, nullable=False, default=DEFAULT_VOUCHER_SESSIONS)
     date_issued    = db.Column(db.Date, nullable=False, default=date_t.today)

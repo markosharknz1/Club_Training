@@ -77,6 +77,10 @@ def create_app():
         if 'category' not in session_tmpl_cols:
             db.session.execute(db.text("ALTER TABLE session_templates ADD COLUMN category VARCHAR(10) NOT NULL DEFAULT 'Mixed'"))
             db.session.commit()
+        voucher_cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(vouchers)")).fetchall()]
+        if voucher_cols and 'voucher_number' not in voucher_cols:
+            db.session.execute(db.text("ALTER TABLE vouchers ADD COLUMN voucher_number VARCHAR(50)"))
+            db.session.commit()
 
     # ── Auto-close stale sessions ─────────────────────────────────────
 
@@ -409,16 +413,21 @@ def create_app():
         if request.method == 'POST':
             file = request.files.get('csv_file')
             if not file or not file.filename:
-                flash('Choose a CSV file first.', 'danger')
+                flash('Choose a CSV or Excel file first.', 'danger')
                 return redirect(url_for('players_import'))
 
-            import csv, io
-            text   = file.stream.read().decode('utf-8-sig', errors='replace')
-            reader = csv.DictReader(io.StringIO(text))
+            rows = _read_tabular_rows(file)
+            if not rows:
+                flash('That file appears to be empty.', 'danger')
+                return redirect(url_for('players_import'))
 
-            # Flexible header matching — case/space-insensitive
+            # Flexible header matching — case/space-insensitive. A full "name"
+            # column OR separate given/surname columns both work.
             field_map = {
                 'name':      {'name', 'full name', 'player', 'player name'},
+                'given':     {'given', 'given name', 'first', 'first name'},
+                'surname':   {'surname', 'last name', 'family name', 'last'},
+                'sv':        {'sv', 'sports voucher', 'voucher'},
                 'age':       {'age'},
                 'category':  {'category', 'junior/senior', 'type'},
                 'address':   {'address'},
@@ -428,20 +437,31 @@ def create_app():
                 'guardian_phone': {'guardian phone', 'phone', 'contact', 'guardian contact'},
                 'guardian_email': {'guardian email', 'email'},
             }
-            headers = {(h or '').strip().lower().replace('_', ' '): h for h in (reader.fieldnames or [])}
+            header_cells = [str(h or '').strip().lower().replace('_', ' ') for h in rows[0]]
             col = {}
             for field, aliases in field_map.items():
-                for alias in aliases:
-                    if alias in headers:
-                        col[field] = headers[alias]
+                for j, h in enumerate(header_cells):
+                    if h in aliases:
+                        col[field] = j
                         break
+
+            if 'name' not in col and not ('given' in col or 'surname' in col):
+                flash('Could not find a name column (looked for "name" or "given"/"surname" headers).', 'danger')
+                return redirect(url_for('players_import'))
+
+            def cell(row, field):
+                j = col.get(field)
+                if j is None or j >= len(row) or row[j] is None:
+                    return ''
+                return str(row[j]).strip()
 
             added, skipped = 0, 0
             duplicates = []
             existing_names = {n.lower() for (n,) in db.session.query(Player.name).all()}
             today = date.today()
-            for row in reader:
-                name = (row.get(col.get('name'), '') or '').strip() if col.get('name') else ''
+            for row in rows[1:]:
+                name = _clean_person_name(
+                    cell(row, 'name') or f"{cell(row, 'given')} {cell(row, 'surname')}")
                 if not name:
                     skipped += 1
                     continue
@@ -451,27 +471,30 @@ def create_app():
                 existing_names.add(name.lower())
 
                 dob = None
-                age_str = (row.get(col.get('age'), '') or '').strip() if col.get('age') else ''
+                age_str = cell(row, 'age')
                 if age_str:
                     try:
-                        dob = today.replace(year=today.year - int(age_str))
+                        dob = today.replace(year=today.year - int(float(age_str)))
                     except (ValueError, TypeError):
                         pass
 
-                category = (row.get(col.get('category'), '') or '').strip().capitalize() if col.get('category') else ''
+                category = cell(row, 'category').capitalize()
                 if category not in ('Junior', 'Senior'):
                     category = 'Junior'
+
+                notes = 'Sports Voucher' if cell(row, 'sv').lower() in ('y', 'yes', '1', 'true') else None
 
                 db.session.add(Player(
                     name=name,
                     date_of_birth=dob,
                     category=category,
-                    address=(row.get(col.get('address'), '') or '').strip() or None if col.get('address') else None,
-                    own_email=(row.get(col.get('own_email'), '') or '').strip() or None if col.get('own_email') else None,
-                    own_phone=(row.get(col.get('own_phone'), '') or '').strip() or None if col.get('own_phone') else None,
-                    guardian_name=(row.get(col.get('guardian_name'), '') or '').strip() or None if col.get('guardian_name') else None,
-                    guardian_phone=(row.get(col.get('guardian_phone'), '') or '').strip() or None if col.get('guardian_phone') else None,
-                    guardian_email=(row.get(col.get('guardian_email'), '') or '').strip() or None if col.get('guardian_email') else None,
+                    notes=notes,
+                    address=cell(row, 'address') or None,
+                    own_email=cell(row, 'own_email') or None,
+                    own_phone=cell(row, 'own_phone') or None,
+                    guardian_name=cell(row, 'guardian_name') or None,
+                    guardian_phone=cell(row, 'guardian_phone') or None,
+                    guardian_email=cell(row, 'guardian_email') or None,
                 ))
                 added += 1
 
@@ -944,17 +967,22 @@ def create_app():
             action = request.form.get('action')
             if action == 'add':
                 player_id   = int(request.form['player_id'])
+                voucher_num = request.form.get('voucher_number', '').strip() or None
                 amount      = float(request.form.get('amount') or DEFAULT_VOUCHER_AMOUNT)
                 sessions    = int(request.form.get('sessions_total') or DEFAULT_VOUCHER_SESSIONS)
                 issued_str  = request.form.get('date_issued') or date.today().isoformat()
                 issued_date = date.fromisoformat(issued_str)
                 notes       = request.form.get('notes', '').strip() or None
                 limit_error = _voucher_limit_error(player_id, issued_date)
+                if voucher_num and Voucher.query.filter(
+                        db.func.lower(Voucher.voucher_number) == voucher_num.lower()).first():
+                    limit_error = f'Voucher number "{voucher_num}" is already registered.'
                 if limit_error:
                     flash(limit_error, 'danger')
                 else:
                     db.session.add(Voucher(
-                        player_id=player_id, amount=amount, sessions_total=sessions,
+                        player_id=player_id, voucher_number=voucher_num,
+                        amount=amount, sessions_total=sessions,
                         date_issued=issued_date, notes=notes,
                     ))
                     db.session.commit()
@@ -1014,6 +1042,7 @@ def create_app():
 
         info_data = [
             ['Player name:',        p.name],
+            ['Voucher number:',     v.voucher_number or '—'],
             ['Voucher date issued:', v.date_issued.strftime('%d %b %Y')],
             ['Voucher amount:',     f'${int(round(float(v.amount)))}'],
             ['Sessions total:',     str(v.sessions_total)],
@@ -1062,12 +1091,181 @@ def create_app():
         filename = f'voucher_{safe_name}_{v.date_issued.isoformat()}.pdf'
         return send_file(buf, mimetype='application/pdf', as_attachment=True, download_name=filename)
 
+    @app.route('/vouchers/import', methods=['GET', 'POST'])
+    def vouchers_import():
+        if request.method == 'POST':
+            import re as _re
+            file = request.files.get('csv_file')
+            if not file or not file.filename:
+                flash('Choose a CSV or Excel file first.', 'danger')
+                return redirect(url_for('vouchers_import'))
+
+            rows = _read_tabular_rows(file)
+            if not rows:
+                flash('That file appears to be empty.', 'danger')
+                return redirect(url_for('vouchers_import'))
+
+            field_map = {
+                'name':           {'name', 'player', 'player name', 'child', 'child name', 'full name'},
+                'voucher_number': {'voucher number', 'voucher no', 'voucher', 'number', 'voucher id', 'voucher code', 'code'},
+                'amount':         {'amount', 'value'},
+                'sessions':       {'sessions', 'sessions total'},
+                'remaining':      {'remaining', 'remaining lessons', 'remaining sessions', 'lessons left', 'balance'},
+                'date_issued':    {'date issued', 'issued', 'date'},
+                'notes':          {'notes'},
+            }
+
+            # The header row isn't always row 1 — balance sheets have title rows
+            # above it. Find the first row containing a name-style header.
+            header_idx = None
+            for i, row in enumerate(rows[:30]):
+                cells = [str(c or '').strip().lower().replace('_', ' ') for c in row]
+                if any(c in field_map['name'] for c in cells):
+                    header_idx, header_cells = i, cells
+                    break
+            if header_idx is None:
+                flash('Could not find a header row with a "name" column in that file.', 'danger')
+                return redirect(url_for('vouchers_import'))
+
+            col = {}
+            for field, aliases in field_map.items():
+                for j, h in enumerate(header_cells):
+                    if h in aliases:
+                        col[field] = j
+                        break
+
+            # Balance-sheet extras, drawn from the rows above the header:
+            # a "Remaining lessons ..." column label and a carryover date.
+            issued_default = date.today()
+            for row in rows[:header_idx + 1]:
+                for j, c in enumerate(row):
+                    s = str(c or '').lower()
+                    if 'remaining' not in col and ('remaining' in s or 'lesson' in s):
+                        col['remaining'] = j
+                    m = _re.search(r'(\d{1,2})/(\d{1,2})/(\d{2,4})', str(c or ''))
+                    if m:
+                        dd, mm, yy = (int(x) for x in m.groups())
+                        yy = yy + 2000 if yy < 100 else yy
+                        try:
+                            issued_default = date(yy, mm, dd)
+                        except ValueError:
+                            pass
+
+            # Last resort: a numeric column next to the names is the balance.
+            data_rows = rows[header_idx + 1:]
+            if 'remaining' not in col and not any(k in col for k in ('voucher_number', 'sessions', 'amount')):
+                name_j = col['name']
+                width = max((len(r) for r in data_rows), default=0)
+                for j in range(width):
+                    if j == name_j:
+                        continue
+                    vals = [r[j] for r in data_rows if j < len(r) and r[j] is not None and str(r[j]).strip()]
+                    if vals and all(str(v).strip().replace('.', '', 1).isdigit() for v in map(str, vals)):
+                        col['remaining'] = j
+                        break
+
+            def cell(row, field):
+                j = col.get(field)
+                if j is None or j >= len(row) or row[j] is None:
+                    return ''
+                return str(row[j]).strip()
+
+            def parse_issued(s):
+                for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d/%m/%y'):
+                    try:
+                        return datetime.strptime(s, fmt).date()
+                    except ValueError:
+                        continue
+                return None
+
+            per_session = float(DEFAULT_VOUCHER_AMOUNT) / DEFAULT_VOUCHER_SESSIONS
+            find_player, fuzzy_notes = _build_player_matcher(Player.query.all())
+            existing_numbers = {v.voucher_number.lower()
+                                for v in Voucher.query.filter(Voucher.voucher_number.isnot(None)).all()}
+
+            added, skipped = 0, 0
+            unknown, duplicates, blocked = [], [], []
+            for row in data_rows:
+                name = _clean_person_name(cell(row, 'name'))
+                if not name:
+                    skipped += 1
+                    continue
+                player = find_player(name)
+                if not player:
+                    unknown.append(name)
+                    continue
+                vnum = cell(row, 'voucher_number') or None
+                if vnum and vnum.lower() in existing_numbers:
+                    duplicates.append(vnum)
+                    continue
+                issued = parse_issued(cell(row, 'date_issued')) or issued_default
+                limit_error = _voucher_limit_error(player.id, issued)
+                if limit_error:
+                    blocked.append(f'{name} ({limit_error.rstrip(".")})')
+                    continue
+
+                remaining = None
+                rem_str = cell(row, 'remaining')
+                if rem_str:
+                    try:
+                        remaining = int(float(rem_str))
+                    except ValueError:
+                        pass
+
+                if remaining is not None:
+                    # Carryover balance: the voucher enters the app with exactly
+                    # this many sessions left on it.
+                    sessions = remaining
+                    amount   = int(round(remaining * per_session))
+                    notes    = cell(row, 'notes') or f'Imported balance — {remaining} sessions remaining'
+                else:
+                    try:
+                        amount = float(cell(row, 'amount') or DEFAULT_VOUCHER_AMOUNT)
+                    except ValueError:
+                        amount = DEFAULT_VOUCHER_AMOUNT
+                    try:
+                        sessions = int(float(cell(row, 'sessions') or DEFAULT_VOUCHER_SESSIONS))
+                    except ValueError:
+                        sessions = DEFAULT_VOUCHER_SESSIONS
+                    notes = cell(row, 'notes') or None
+
+                db.session.add(Voucher(
+                    player_id=player.id, voucher_number=vnum,
+                    amount=amount, sessions_total=sessions,
+                    date_issued=issued, notes=notes,
+                ))
+                db.session.flush()   # so the limit check sees this voucher for repeat names
+                if vnum:
+                    existing_numbers.add(vnum.lower())
+                added += 1
+
+            db.session.commit()
+            msg = f'{added} voucher{"s" if added != 1 else ""} imported.'
+            if fuzzy_notes:
+                msg += (f' {len(fuzzy_notes)} matched by name similarity — please check: '
+                        + '; '.join(fuzzy_notes) + '.')
+            if skipped:
+                msg += f' {skipped} row{"s" if skipped != 1 else ""} skipped (missing player name).'
+            if unknown:
+                shown = ', '.join(unknown[:8]) + ('…' if len(unknown) > 8 else '')
+                msg += f' {len(unknown)} skipped — player not found: {shown} (add them in the Player Database first).'
+            if duplicates:
+                shown = ', '.join(duplicates[:8]) + ('…' if len(duplicates) > 8 else '')
+                msg += f' {len(duplicates)} skipped — voucher number already registered: {shown}.'
+            if blocked:
+                msg += f' {len(blocked)} blocked by voucher limits: {"; ".join(blocked[:5])}.'
+            flash(msg, 'success' if added else 'warning')
+            return redirect(url_for('vouchers'))
+
+        return render_template('vouchers_import.html')
+
     @app.route('/api/player/<int:player_id>/vouchers')
     def api_player_vouchers(player_id):
         vs = Voucher.query.filter_by(player_id=player_id).order_by(Voucher.date_issued.desc()).all()
         return jsonify(ok=True, vouchers=[{
             'id':                 v.id,
-            'label':              f"{v.date_issued.strftime('%d %b %Y')} — {v.sessions_used}/{v.sessions_total} used, {v.sessions_remaining} left",
+            'label':              (f"#{v.voucher_number} — " if v.voucher_number else '')
+                                  + f"{v.date_issued.strftime('%d %b %Y')} — {v.sessions_used}/{v.sessions_total} used, {v.sessions_remaining} left",
             'sessions_total':     v.sessions_total,
             'sessions_used':      v.sessions_used,
             'sessions_remaining': v.sessions_remaining,
@@ -1548,6 +1746,100 @@ def _player_field_settings():
             'age': '1', 'address': '1', 'email': '1', 'parent_contact': '0', 'phone': '1',
         }),
     }
+
+
+def _read_tabular_rows(file_storage):
+    """Uploaded .xlsx or .csv → list of row tuples. Stops after a long run of
+    blank rows (Excel files often report a million ghost rows)."""
+    filename = (file_storage.filename or '').lower()
+    if filename.endswith(('.xlsx', '.xlsm')):
+        import io
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(file_storage.read()),
+                                    read_only=True, data_only=True)
+        ws = wb.active
+        rows, empty_streak = [], 0
+        for row in ws.iter_rows(values_only=True):
+            if any(c is not None and str(c).strip() for c in row):
+                empty_streak = 0
+            else:
+                empty_streak += 1
+                if empty_streak > 20:
+                    break
+            rows.append(tuple(row))
+        wb.close()
+    else:
+        import csv, io
+        text = file_storage.read().decode('utf-8-sig', errors='replace')
+        rows = [tuple(r) for r in csv.reader(io.StringIO(text))]
+    while rows and not any(c is not None and str(c).strip() for c in rows[-1]):
+        rows.pop()
+    return rows
+
+
+def _clean_person_name(value):
+    """Normalise an imported name: drop marker characters like ^ and *, and
+    collapse whitespace. Parenthesised preferred names are kept."""
+    s = str(value or '').replace('^', ' ').replace('*', ' ')
+    return ' '.join(s.split())
+
+
+def _norm_name(value):
+    """Aggressive normalisation for *matching* names across files: lowercase,
+    accents stripped, curly quotes/dashes unified, markers and stray
+    punctuation dropped, all whitespace collapsed."""
+    import unicodedata
+    s = unicodedata.normalize('NFKD', str(value or ''))
+    s = ''.join(ch for ch in s if not unicodedata.combining(ch))
+    s = (s.replace('’', "'").replace('‘', "'")
+          .replace('–', '-').replace('—', '-'))
+    s = ''.join(ch if (ch.isalnum() or ch in " '-") else ' ' for ch in s)
+    return ' '.join(s.lower().split())
+
+
+def _build_player_matcher(players):
+    """Returns (find, fuzzy_notes). find(raw_name) resolves an imported name to
+    a Player via, in order: exact normalised match; unique first+last token
+    match (handles middle names); careful fuzzy match for typos — requiring a
+    high similarity, a clear margin over the runner-up, and a similar first
+    name, so it can never guess between siblings who share a surname.
+    Non-exact matches are recorded in fuzzy_notes for the result message."""
+    import difflib
+
+    by_norm, by_first_last = {}, {}
+    for p in players:
+        n = _norm_name(p.name)
+        by_norm.setdefault(n, []).append(p)
+        toks = n.split()
+        if toks:
+            by_first_last.setdefault((toks[0], toks[-1]), []).append(p)
+    all_norms = list(by_norm.keys())
+    fuzzy_notes = []
+
+    def find(raw):
+        n = _norm_name(raw)
+        if not n:
+            return None
+        cands = by_norm.get(n)
+        if cands and len(cands) == 1:
+            return cands[0]
+        toks = n.split()
+        cands = by_first_last.get((toks[0], toks[-1]))
+        if cands and len(cands) == 1:
+            fuzzy_notes.append(f'"{_clean_person_name(raw)}" matched to {cands[0].name}')
+            return cands[0]
+        close = difflib.get_close_matches(n, all_norms, n=2, cutoff=0.85)
+        if close and len(by_norm[close[0]]) == 1:
+            r1 = difflib.SequenceMatcher(None, n, close[0]).ratio()
+            r2 = difflib.SequenceMatcher(None, n, close[1]).ratio() if len(close) > 1 else 0.0
+            first_sim = difflib.SequenceMatcher(None, toks[0], close[0].split()[0]).ratio()
+            if r1 >= 0.88 and (r1 - r2) >= 0.04 and first_sim >= 0.8:
+                p = by_norm[close[0]][0]
+                fuzzy_notes.append(f'"{_clean_person_name(raw)}" matched to {p.name}')
+                return p
+        return None
+
+    return find, fuzzy_notes
 
 
 def _reports_data(months, session_filter):

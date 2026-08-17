@@ -11,16 +11,18 @@
   <div class="card-body">
     <form method="post" action="/players/import" enctype="multipart/form-data">
       <div class="mb-3">
-        <label class="form-label fw-semibold">CSV file</label>
-        <input type="file" name="csv_file" class="form-control" accept=".csv" required>
+        <label class="form-label fw-semibold">CSV or Excel file</label>
+        <input type="file" name="csv_file" class="form-control" accept=".csv,.xlsx" required>
       </div>
       <p class="text-muted small mb-3">
-        Expected columns (any order, case-insensitive): <code>name</code>, <code>age</code>,
-        <code>category</code> (Junior/Senior, defaults to Junior), <code>address</code>,
-        <code>own_email</code>, <code>own_phone</code>, <code>guardian_name</code>,
-        <code>guardian_phone</code>, <code>guardian_email</code>.
-        Only <code>name</code> is required — everything else is optional. Age is converted to an
-        approximate date of birth.
+        Accepts <code>.csv</code> or <code>.xlsx</code>. Columns (any order, case-insensitive):
+        either a single <code>name</code> column or separate <code>Given</code> +
+        <code>Surname</code> columns; plus optional <code>SV</code> (Y = sports voucher user,
+        saved to notes), <code>age</code>, <code>category</code> (Junior/Senior, defaults to
+        Junior), <code>address</code>, <code>own_email</code>, <code>own_phone</code>,
+        <code>guardian_name</code>, <code>guardian_phone</code>, <code>guardian_email</code>.
+        Only the name is required. Marker characters like <code>^</code> in names are stripped.
+        Names already in the database are skipped, so re-importing is safe.
       </p>
       <pre class="bg-light p-2 rounded small mb-3">name,age,category,guardian_name,guardian_phone,guardian_email
 Alex Smith,9,Junior,Jane Smith,0211234567,jane@example.com

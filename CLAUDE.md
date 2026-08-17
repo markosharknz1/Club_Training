@@ -272,6 +272,40 @@ own machine and demo to other club members (e.g. "Carol").
     bulk action (`POST /players/mark-inactive`). Nothing is automatic — it only ever *offers*.
     Inactive players keep all history and can be reactivated via Edit.
 
+20. **Voucher numbers + voucher CSV import.** `Voucher.voucher_number` (add-only migration) —
+    the number printed on the physical/government voucher. Shown as a "Voucher #" column on the
+    Vouchers page, a field in the New Voucher modal (which rejects already-registered numbers),
+    prefixed in the check-in voucher-picker labels, and on the per-voucher PDF. **`/vouchers/
+    import`** (↑ Import CSV button on the Vouchers page, `templates/vouchers_import.html`) bulk-
+    imports vouchers: columns `name` (must match an existing player, case-insensitive),
+    `voucher_number`, `amount`, `sessions`, `date_issued` (ISO or `dd/mm/yyyy`), `notes` — only
+    `name` required. Rows are validated against the normal 2-active/2-per-year limits, unknown
+    players and duplicate numbers are skipped and itemised in the result message.
+
+21. **Excel import + real GBC file formats.** Both importers (`/players/import`,
+    `/vouchers/import`) accept `.xlsx` as well as `.csv` via the shared `_read_tabular_rows()`
+    helper (openpyxl; stops after 20 consecutive blank rows because real Excel files report ~1M
+    ghost rows). Built against the club's actual files (`E:\GBC\GBC Juniors for Mark.xlsx`,
+    `E:\GBC\GBC Sports Vouchers for Mark.xlsx` — real kids' data, **never commit these or copy
+    them into the repo**):
+    - Player import understands separate `Given`/`Surname` columns (combined into one name), an
+      `SV` column (`Y` → notes = "Sports Voucher"), and strips `^` markers from names
+      (`_clean_person_name`). Name-dedup makes re-imports safe.
+    - Voucher import handles a **carryover balance sheet**: header row found anywhere in the
+      first 30 rows (title rows above are fine), a "Remaining lessons"-style column (or, failing
+      that, the numeric column next to the names), and a `d/m/yy` date in the title used as
+      `date_issued`. Each row becomes a voucher whose `sessions_total` = the remaining count
+      (amount = remaining × $10). **Re-importing a balance sheet duplicates vouchers** — warned
+      on the import page.
+    - **Name matching across files** (`_build_player_matcher` + `_norm_name`): exact normalised
+      (accents/curly-quotes/markers/whitespace) → unique first+last token (handles middle names,
+      e.g. "Neville Rui Yee Tan" → "Neville Tan") → guarded fuzzy (similarity ≥ .88, clear margin
+      over runner-up, first-name similarity ≥ .8 — deliberately refuses to guess between siblings
+      like Ometh/Okitha/Onadi Karunathilaka, and won't map nicknames like Rudolph→Rudi). All
+      non-exact matches are itemised in the result message as "matched by name similarity —
+      please check". Verified against the real files: 165/165 players, 30/36 vouchers, the 6
+      unmatched genuinely absent from the juniors list.
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

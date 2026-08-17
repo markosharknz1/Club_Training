@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block title %}Import Vouchers — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h5 class="mb-0 fw-bold">Import Sports Vouchers from CSV</h5>
+  <a href="/vouchers" class="btn btn-outline-secondary btn-sm">← Back</a>
+</div>
+
+<div class="card shadow-sm border-0" style="max-width:560px">
+  <div class="card-body">
+    <form method="post" action="/vouchers/import" enctype="multipart/form-data">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">CSV or Excel file</label>
+        <input type="file" name="csv_file" class="form-control" accept=".csv,.xlsx" required>
+      </div>
+      <p class="text-muted small mb-3">
+        Accepts <code>.csv</code> or <code>.xlsx</code>, in either of two shapes:
+      </p>
+      <ul class="text-muted small mb-3">
+        <li><strong>Voucher list</strong> — columns <code>name</code> (the child, must already
+          exist in the Player Database), <code>voucher_number</code>, <code>amount</code>
+          (default 100), <code>sessions</code> (default 10), <code>date_issued</code>
+          (<code>2026-08-01</code> or <code>01/08/2026</code>), <code>notes</code>.
+          Only <code>name</code> is required.</li>
+        <li><strong>Carryover balance sheet</strong> — a <code>Name</code> column plus a
+          "remaining lessons" number column (title rows above the header are fine; a date like
+          <code>5/7/26</code> in the title is used as the issue date). Each row becomes a voucher
+          with exactly that many sessions left.</li>
+      </ul>
+      <p class="text-muted small mb-3">
+        Rows are checked against the normal voucher limits (max 2 active, max 2 per calendar
+        year), already-registered voucher numbers are skipped, and unknown player names are
+        listed so you can add them first. <strong>Don't import the same balance sheet twice</strong>
+        — each import creates new vouchers.
+      </p>
+      <pre class="bg-light p-2 rounded small mb-3">name,voucher_number,date_issued
+Alex Smith,AK-2026-0012345,01/08/2026
+Sam Lee,AK-2026-0067890,</pre>
+      <button type="submit" class="btn btn-success">Import</button>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

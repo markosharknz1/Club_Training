@@ -4,9 +4,12 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <h5 class="mb-0 fw-bold">Sports Vouchers</h5>
-  <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#newVoucherModal">
-    + New Voucher
-  </button>
+  <div class="d-flex gap-2">
+    <a href="/vouchers/import" class="btn btn-outline-secondary btn-sm">↑ Import CSV</a>
+    <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#newVoucherModal">
+      + New Voucher
+    </button>
+  </div>
 </div>
 
 <p class="text-muted small">
@@ -33,6 +36,7 @@
       <thead class="table-dark">
         <tr>
           <th>Player</th>
+          <th>Voucher #</th>
           <th>Date Issued</th>
           <th class="text-end">Amount</th>
           <th class="text-center">Sessions Used</th>
@@ -45,6 +49,7 @@
         {% for v in voucher_list %}
         <tr>
           <td class="fw-semibold">{{ v.player.name }}</td>
+          <td class="text-muted">{{ v.voucher_number or '—' }}</td>
           <td>{{ v.date_issued.strftime('%d %b %Y') }}</td>
           <td class="text-end">{{ v.amount | float | round | int }}</td>
           <td class="text-center">{{ v.sessions_used }} / {{ v.sessions_total }}</td>
@@ -96,6 +101,11 @@
               {% endfor %}
             </select>
           </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Voucher number</label>
+            <input type="text" name="voucher_number" class="form-control"
+                   placeholder="Optional — the number printed on the voucher" autocomplete="off">
+          </div>
           <div class="row g-2">
             <div class="col-6">
               <label class="form-label fw-semibold">Amount</label>
@@ -112,7 +122,7 @@
           </div>
           <div class="mb-2">
             <label class="form-label fw-semibold">Notes</label>
-            <input type="text" name="notes" class="form-control" placeholder="Optional — e.g. voucher number">
+            <input type="text" name="notes" class="form-control" placeholder="Optional">
           </div>
         </div>
         <div class="modal-footer">
