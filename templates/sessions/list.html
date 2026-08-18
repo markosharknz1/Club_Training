@@ -51,6 +51,7 @@
         </div>
       </div>
 
+      {% if groups_enabled %}
       {# Groups #}
       <div class="d-flex justify-content-between align-items-center mb-2">
         <span class="text-muted small fw-semibold text-uppercase" style="font-size:.68rem;letter-spacing:.06em">Groups</span>
@@ -66,11 +67,14 @@
       {% else %}
       <div class="text-muted small fst-italic">No groups defined.</div>
       {% endif %}
+      {% endif %}
 
       <div class="text-muted small mt-2">
         {{ s.dates | length }} occurrence{{ 's' if s.dates|length != 1 }} recorded
+        {% if groups_enabled %}
         &nbsp;·&nbsp;
         {{ s.groups | selectattr('active') | list | length }} group{{ 's' if (s.groups|selectattr('active')|list|length) != 1 }}
+        {% endif %}
       </div>
     </div>
   </div>

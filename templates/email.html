@@ -1,0 +1,101 @@
+{% extends 'base.html' %}
+{% block title %}Email Players — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h5 class="mb-0 fw-bold">Email Players</h5>
+</div>
+
+{% if not email_configured %}
+<div class="alert alert-warning">
+  Email isn't set up yet. Add your SMTP2GO details under
+  <a href="/settings" class="alert-link">⚙ Setup → Club Settings → Email</a>, then come back here.
+</div>
+{% endif %}
+
+<p class="text-muted small">
+  Sends an announcement (tournaments, events, notices) to everyone who has played recently —
+  juniors via their guardian's email, seniors via their own. Each address receives its own
+  individual email, so families can't see each other's addresses, and a family with several
+  kids gets just one copy.
+</p>
+
+{# Audience picker #}
+<form method="get" action="/email" class="row g-2 align-items-end mb-3">
+  <div class="col-auto">
+    <label class="form-label small fw-semibold mb-1">Played in the last</label>
+    <select name="months" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="1"  {% if months==1  %}selected{% endif %}>1 month</option>
+      <option value="3"  {% if months==3  %}selected{% endif %}>3 months</option>
+      <option value="6"  {% if months==6  %}selected{% endif %}>6 months</option>
+      <option value="12" {% if months==12 %}selected{% endif %}>12 months</option>
+    </select>
+  </div>
+</form>
+
+{# Recipient summary #}
+<div class="row g-3 mb-4">
+  <div class="col-lg-7">
+    <div class="card shadow-sm border-0">
+      <div class="card-header fw-semibold">
+        Recipients — {{ email_map | length }} address{{ 'es' if email_map|length != 1 }}
+      </div>
+      {% if email_map %}
+      <div class="card-body p-0" style="max-height:260px;overflow-y:auto">
+        <table class="table table-sm mb-0" style="font-size:.85rem">
+          <tbody>
+            {% for email, names in email_map.items() %}
+            <tr>
+              <td class="text-muted">{{ email }}</td>
+              <td>{{ names | join(', ') }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="card-body py-3">
+        <span class="text-muted small fst-italic">No players with an email address played in this period.</span>
+      </div>
+      {% endif %}
+    </div>
+
+    {% if missing %}
+    <div class="alert alert-warning mt-3 small">
+      <strong>{{ missing | length }} recent player{{ 's have' if missing|length != 1 else ' has' }} no email on file</strong>
+      and will be missed:
+      {{ missing[:15] | join(', ') }}{% if missing|length > 15 %}… ({{ missing|length - 15 }} more){% endif %}.
+      Add emails via the Player Database → Edit.
+    </div>
+    {% endif %}
+  </div>
+
+  {# Compose #}
+  <div class="col-lg-5">
+    <div class="card shadow-sm border-0">
+      <div class="card-header fw-semibold">Message</div>
+      <div class="card-body">
+        <form method="post" action="/email/send"
+              onsubmit="return confirm('Send this email to {{ email_map | length }} address{{ 'es' if email_map|length != 1 }}?')">
+          <input type="hidden" name="months" value="{{ months }}">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Subject <span class="text-danger">*</span></label>
+            <input type="text" name="subject" class="form-control" required
+                   placeholder="e.g. Upcoming junior tournament — 14 September">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Message <span class="text-danger">*</span></label>
+            <textarea name="body" class="form-control" rows="9" required
+                      placeholder="Hi everyone,&#10;&#10;..."></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary"
+                  {% if not email_configured or not email_map %}disabled{% endif %}>
+            ✉ Send to {{ email_map | length }} address{{ 'es' if email_map|length != 1 }}
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

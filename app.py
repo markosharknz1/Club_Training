@@ -3,8 +3,9 @@ Badminton Club — junior session management
 Run:  python app.py
 """
 import calendar as _cal_mod
-import glob, json, os, shutil, socket, sys, threading, time, webbrowser
+import glob, json, os, shutil, smtplib, socket, sys, threading, time, webbrowser
 import requests
+from email.mime.text import MIMEText
 from collections import defaultdict, OrderedDict
 from datetime import date, datetime, timedelta
 
@@ -129,14 +130,16 @@ def create_app():
                 'history'  if ep == 'history'            else
                 'reports'  if ep == 'reports'            else
                 'vouchers' if ep == 'vouchers'           else
+                'email'    if ep.startswith('email')     else
                 'sessions' if ep == 'sessions'           else
                 'coaches'  if ep == 'coaches'            else
                 'settings' if ep == 'settings'           else '')
         return {
-            'club_name':    Setting.get('club_name', 'My Badminton Club'),
-            'today':        date.today(),
-            'active_page':  page,
-            'testing_mode': Setting.get('testing_mode', '0') == '1',
+            'club_name':      Setting.get('club_name', 'My Badminton Club'),
+            'today':          date.today(),
+            'active_page':    page,
+            'testing_mode':   Setting.get('testing_mode', '0') == '1',
+            'groups_enabled': Setting.get('groups_enabled', '1') == '1',
         }
 
     # ── Home → redirect to today's day view ──────────────────────────
@@ -725,7 +728,8 @@ def create_app():
                     'group_name':   a.group.name if a.group else None,
                 }
 
-        # Sessions data for JS modal
+        # Sessions data for JS modal (no group options when groups are disabled)
+        use_groups = Setting.get('groups_enabled', '1') == '1'
         sessions_js = [
             {
                 'sd_id':       sd.id,
@@ -733,7 +737,7 @@ def create_app():
                 'price_cash':  int(round(float(sd.template.price_cash or 0))),
                 'price_card':  int(round(float(sd.template.price_card or 0))),
                 'groups':      [{'id': g.id, 'name': g.name}
-                                for g in sd.day_active_groups],
+                                for g in sd.day_active_groups] if use_groups else [],
             }
             for sd in session_dates
         ]
@@ -1334,7 +1338,21 @@ def create_app():
             return redirect(url_for('coaches'))
 
         all_coaches = Coach.query.filter_by(active=True).order_by(Coach.name).all()
-        return render_template('coaches.html', coaches=all_coaches)
+
+        # Coaching stats: sessions coached ever/this year, and last coached date
+        coach_stats = {}
+        this_year = date.today().year
+        for sd in SessionDate.query.all():
+            for c in sd.coaches:
+                st = coach_stats.setdefault(c.id, {'total': 0, 'this_year': 0, 'last': None})
+                st['total'] += 1
+                if sd.date.year == this_year:
+                    st['this_year'] += 1
+                if st['last'] is None or sd.date > st['last']:
+                    st['last'] = sd.date
+
+        return render_template('coaches.html', coaches=all_coaches,
+                               coach_stats=coach_stats, this_year=this_year)
 
     # ── Reports ──────────────────────────────────────────────────────
 
@@ -1406,6 +1424,18 @@ def create_app():
                 Setting.set('club_name', name)
             elif section == 'testing_mode':
                 Setting.set('testing_mode', '1' if request.form.get('testing_mode') else '0')
+            elif section == 'groups':
+                Setting.set('groups_enabled', '1' if request.form.get('groups_enabled') else '0')
+            elif section == 'email':
+                Setting.set('email_enabled', '1' if request.form.get('email_enabled') else '0')
+                Setting.set('smtp_host', request.form.get('smtp_host', '').strip() or 'mail.smtp2go.com')
+                Setting.set('smtp_port', request.form.get('smtp_port', '').strip() or '2525')
+                Setting.set('smtp_username', request.form.get('smtp_username', '').strip())
+                Setting.set('email_from', request.form.get('email_from', '').strip())
+                Setting.set('email_from_name', request.form.get('email_from_name', '').strip())
+                new_pwd = request.form.get('smtp_password', '').strip()
+                if new_pwd:
+                    Setting.set('smtp_password', new_pwd)
             elif section == 'square':
                 Setting.set('square_enabled', '1' if request.form.get('square_enabled') else '0')
                 Setting.set('square_environment', request.form.get('square_environment', 'sandbox'))
@@ -1432,7 +1462,54 @@ def create_app():
                                square_location_id=Setting.get('square_location_id', ''),
                                square_device_id=Setting.get('square_device_id', ''),
                                square_token_set=bool(Setting.get('square_access_token', '')),
+                               email_enabled=Setting.get('email_enabled', '0') == '1',
+                               smtp_host=Setting.get('smtp_host', 'mail.smtp2go.com'),
+                               smtp_port=Setting.get('smtp_port', '2525'),
+                               smtp_username=Setting.get('smtp_username', ''),
+                               email_from=Setting.get('email_from', ''),
+                               email_from_name=Setting.get('email_from_name', ''),
+                               smtp_password_set=bool(Setting.get('smtp_password', '')),
                                field_cfg=_player_field_settings())
+
+    # ── Email players ────────────────────────────────────────────────
+
+    @app.route('/email')
+    def email_players():
+        months = request.args.get('months', 3, type=int)
+        email_map, missing = _recent_player_emails(months)
+        return render_template('email.html',
+                               months=months, email_map=email_map, missing=missing,
+                               email_configured=_email_configured())
+
+    @app.route('/email/send', methods=['POST'])
+    def email_players_send():
+        if not _email_configured():
+            flash('Email is not set up yet — add your SMTP2GO details in Club Settings first.', 'danger')
+            return redirect(url_for('email_players'))
+
+        months  = request.form.get('months', 3, type=int)
+        subject = request.form.get('subject', '').strip()
+        body    = request.form.get('body', '').strip()
+        if not subject or not body:
+            flash('Subject and message are both required.', 'danger')
+            return redirect(url_for('email_players', months=months))
+
+        email_map, _ = _recent_player_emails(months)
+        if not email_map:
+            flash('No recipients found for that period.', 'warning')
+            return redirect(url_for('email_players', months=months))
+
+        try:
+            sent, failures = _send_bulk_email(subject, body, list(email_map.keys()))
+        except (smtplib.SMTPException, OSError) as e:
+            flash(f'Could not send: {e} — check the SMTP details in Club Settings.', 'danger')
+            return redirect(url_for('email_players', months=months))
+
+        msg = f'Sent to {sent} address{"es" if sent != 1 else ""}.'
+        if failures:
+            msg += f' {len(failures)} failed: {", ".join(failures[:5])}{"…" if len(failures) > 5 else ""}.'
+        flash(msg, 'success' if sent and not failures else 'warning')
+        return redirect(url_for('email_players', months=months))
 
     # ── Export ───────────────────────────────────────────────────────
 
@@ -1853,6 +1930,62 @@ def _build_player_matcher(players):
         return None
 
     return find, fuzzy_notes
+
+
+def _email_configured():
+    return (Setting.get('email_enabled', '0') == '1'
+            and bool(Setting.get('smtp_username', ''))
+            and bool(Setting.get('smtp_password', ''))
+            and bool(Setting.get('email_from', '')))
+
+
+def _recent_player_emails(months):
+    """Players who attended in the last `months` months → best contact email.
+    Juniors use guardian email first; Seniors their own email first. Returns
+    (email_map: email → [player names], missing: [player names with no email])."""
+    cutoff = date.today() - timedelta(days=months * 30)
+    pids = {pid for (pid,) in db.session.query(Attendance.player_id)
+            .join(SessionDate, Attendance.session_date_id == SessionDate.id)
+            .filter(SessionDate.date >= cutoff).distinct()}
+    email_map, missing = OrderedDict(), []
+    for p in (Player.query.filter(Player.id.in_(pids), Player.active == True)
+              .order_by(Player.name).all() if pids else []):
+        if p.category == 'Senior':
+            email = (p.own_email or '').strip() or (p.guardian_email or '').strip()
+        else:
+            email = (p.guardian_email or '').strip() or (p.own_email or '').strip()
+        if email:
+            email_map.setdefault(email.lower(), []).append(p.name)
+        else:
+            missing.append(p.name)
+    return email_map, missing
+
+
+def _send_bulk_email(subject, body, addresses):
+    """Send one individual email per address (no shared To/CC — keeps parents'
+    addresses private from each other). Returns (sent_count, failures)."""
+    host      = Setting.get('smtp_host', 'mail.smtp2go.com') or 'mail.smtp2go.com'
+    port      = int(Setting.get('smtp_port', '2525') or 2525)
+    user      = Setting.get('smtp_username', '')
+    password  = Setting.get('smtp_password', '')
+    from_addr = Setting.get('email_from', '')
+    from_name = Setting.get('email_from_name', '') or Setting.get('club_name', '')
+
+    sent, failures = 0, []
+    with smtplib.SMTP(host, port, timeout=30) as server:
+        server.starttls()
+        server.login(user, password)
+        for addr in addresses:
+            try:
+                msg = MIMEText(body, 'plain', 'utf-8')
+                msg['Subject'] = subject
+                msg['From']    = f'{from_name} <{from_addr}>' if from_name else from_addr
+                msg['To']      = addr
+                server.send_message(msg)
+                sent += 1
+            except smtplib.SMTPException as e:
+                failures.append(f'{addr} ({e.__class__.__name__})')
+    return sent, failures
 
 
 def _reports_data(months, session_filter):

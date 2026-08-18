@@ -39,7 +39,7 @@
     {% set ns = namespace(cur_group=None) %}
     {% for p in regulars | sort(attribute='default_group.name') %}
       {% set gname = p.default_group.name if p.default_group else 'No group' %}
-      {% if gname != ns.cur_group %}
+      {% if groups_enabled and gname != ns.cur_group %}
         {% set ns.cur_group = gname %}
         <div class="section-header px-3">{{ gname }}</div>
       {% endif %}

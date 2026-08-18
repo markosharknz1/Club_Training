@@ -48,6 +48,7 @@
           {% endif %}
         {% endfor %}
       </div>
+      {% if groups_enabled %}
       <hr class="my-2">
       <div class="small text-muted fw-semibold mb-1">By group</div>
       <div id="tot-groups" class="small">
@@ -57,6 +58,7 @@
         </div>
         {% endfor %}
       </div>
+      {% endif %}
     </div>
   </div>
 
@@ -105,7 +107,7 @@
           <tr>
             <th>Player</th>
             <th style="width:90px">Age</th>
-            <th>Group</th>
+            {% if groups_enabled %}<th>Group</th>{% endif %}
             <th style="width:230px">Payment</th>
             <th style="width:80px" class="text-end">Amount</th>
             <th style="width:70px"></th>
@@ -127,7 +129,7 @@
               {% endif %}
             </td>
             <td class="text-muted">{{ p.age if p.age is not none else '—' }}</td>
-            <td class="text-muted small">{{ a.group.name if a and a.group else (p.default_group.name if p.default_group else '—') }}</td>
+            {% if groups_enabled %}<td class="text-muted small">{{ a.group.name if a and a.group else (p.default_group.name if p.default_group else '—') }}</td>{% endif %}
             <td>
               {% if a %}
               <span class="badge bg-{{ PAYMENT_COLORS.get(a.payment_type,'secondary') }} me-1">
@@ -163,7 +165,7 @@
             </td>
           </tr>
         {% else %}
-        <tr><td colspan="6" class="text-center text-muted py-4">
+        <tr><td colspan="{{ 6 if groups_enabled else 5 }}" class="text-center text-muted py-4">
           No players assigned to this session yet.
           <a href="/players">Add players →</a>
         </td></tr>
@@ -207,7 +209,7 @@
           <input type="number" id="modal-amount" class="form-control" step="1" min="0" value="0">
         </div>
 
-        <div class="mb-3">
+        <div class="mb-3 {% if not groups_enabled %}d-none{% endif %}">
           <label class="form-label fw-semibold">Group</label>
           <select id="modal-group" class="form-select">
             <option value="">— no group —</option>

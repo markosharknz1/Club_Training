@@ -7,7 +7,7 @@
     <h5 class="mb-0 fw-bold">
       {% if is_today %}Today — {% endif %}{{ d.strftime('%A, %d %B %Y') }}
     </h5>
-    <div class="text-muted small">Select which sessions run today and which groups are active.</div>
+    <div class="text-muted small">Select which sessions run today{% if groups_enabled %} and which groups are active{% endif %}.</div>
   </div>
   <a href="/day/{{ d.isoformat() }}" class="btn btn-outline-secondary btn-sm">← Back</a>
 </div>
@@ -51,6 +51,7 @@
         </div>
       </div>
 
+      {% if groups_enabled %}
       {% if s.active_groups %}
       <div class="card-body py-3" id="groups-{{ s.id }}"
            {% if s.day_of_week != d.weekday() %}style="display:none"{% endif %}>
@@ -75,6 +76,7 @@
            {% if s.day_of_week != d.weekday() %}style="display:none"{% endif %}>
         <span class="text-muted small fst-italic">No groups defined for this session.</span>
       </div>
+      {% endif %}
       {% endif %}
     </div>
     {% endfor %}

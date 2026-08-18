@@ -41,6 +41,9 @@
           <a class="nav-link {% if active_page=='players'  %}active fw-semibold{% endif %}" href="/players">Player Database</a>
         </li>
         <li class="nav-item">
+          <a class="nav-link {% if active_page=='coaches'  %}active fw-semibold{% endif %}" href="/coaches">Coach Database</a>
+        </li>
+        <li class="nav-item">
           <a class="nav-link {% if active_page=='history'  %}active fw-semibold{% endif %}" href="/history">History</a>
         </li>
         <li class="nav-item">
@@ -49,12 +52,14 @@
         <li class="nav-item">
           <a class="nav-link {% if active_page=='vouchers'  %}active fw-semibold{% endif %}" href="/vouchers">Vouchers</a>
         </li>
+        <li class="nav-item">
+          <a class="nav-link {% if active_page=='email'  %}active fw-semibold{% endif %}" href="/email">Email</a>
+        </li>
         <li class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle {% if active_page in ['sessions','coaches','settings'] %}active fw-semibold{% endif %}"
+          <a class="nav-link dropdown-toggle {% if active_page in ['sessions','settings'] %}active fw-semibold{% endif %}"
              href="#" data-bs-toggle="dropdown">⚙ Setup</a>
           <ul class="dropdown-menu dropdown-menu-dark">
             <li><a class="dropdown-item" href="/sessions">Training Sessions</a></li>
-            <li><a class="dropdown-item" href="/coaches">Coaches</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="/settings">Club Settings</a></li>
           </ul>

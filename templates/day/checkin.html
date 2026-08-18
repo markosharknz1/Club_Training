@@ -50,7 +50,7 @@
         <tr>
           <th>Player</th>
           <th>Last Session</th>
-          <th>Last Group</th>
+          {% if groups_enabled %}<th>Last Group</th>{% endif %}
         </tr>
       </thead>
       <tbody id="player-tbody">
@@ -74,10 +74,10 @@
             {% endif %}
           </td>
           <td class="text-muted">{{ last.session_name if last else '' }}</td>
-          <td class="text-muted">{{ last.group_name if last and last.group_name else '' }}</td>
+          {% if groups_enabled %}<td class="text-muted">{{ last.group_name if last and last.group_name else '' }}</td>{% endif %}
         </tr>
         {% else %}
-        <tr id="no-players-row"><td colspan="3" class="text-center text-muted py-3 fst-italic small">All players checked in.</td></tr>
+        <tr id="no-players-row"><td colspan="{{ 3 if groups_enabled else 2 }}" class="text-center text-muted py-3 fst-italic small">All players checked in.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -93,7 +93,7 @@
         <tr>
           <th>Player</th>
           <th>Session</th>
-          <th>Group</th>
+          {% if groups_enabled %}<th>Group</th>{% endif %}
         </tr>
       </thead>
       <tbody id="checkedin-tbody">
@@ -115,10 +115,10 @@
             {% endif %}
           </td>
           <td>{{ info.session_name }}</td>
-          <td class="text-muted">{{ info.group_name or '' }}</td>
+          {% if groups_enabled %}<td class="text-muted">{{ info.group_name or '' }}</td>{% endif %}
         </tr>
         {% else %}
-        <tr id="no-checkedin-row"><td colspan="3" class="text-center text-muted py-3 fst-italic small">No players checked in yet.</td></tr>
+        <tr id="no-checkedin-row"><td colspan="{{ 3 if groups_enabled else 2 }}" class="text-center text-muted py-3 fst-italic small">No players checked in yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -223,7 +223,7 @@
         </div>
 
         {# Group selector #}
-        <div class="mb-3" id="group-row">
+        <div class="mb-3 {% if not groups_enabled %}d-none{% endif %}" id="group-row">
           <label class="form-label fw-semibold">Group</label>
           <select id="modal-group" class="form-select">
             <option value="">— no group —</option>
@@ -332,6 +332,8 @@ const SESSIONS    = {{ sessions_js | safe }};
 const AMOUNT_TYPES = new Set({{ AMOUNT_TYPES | tojson }});
 const PAY_COLORS  = {{ PAYMENT_COLORS | tojson }};
 const DEFAULT_PAY = 'Card';
+const GROUPS_ENABLED = {{ 'true' if groups_enabled else 'false' }};
+const ROW_COLS = GROUPS_ENABLED ? 3 : 2;
 const FIELD_CFG   = {{ field_cfg | tojson }};
 
 // Show/hide optional player fields based on selected Junior/Senior category
@@ -757,7 +759,7 @@ function addPlayerRow(player) {
   tr.dataset.lastSession = '';
   tr.dataset.lastGroup   = '';
   tr.style.cssText       = 'cursor:pointer;user-select:none';
-  tr.innerHTML = `<td><div class="fw-semibold">${player.name}</div></td><td></td><td></td>`;
+  tr.innerHTML = `<td><div class="fw-semibold">${player.name}</div></td><td></td>` + (GROUPS_ENABLED ? '<td></td>' : '');
   insertWaitingRow(tr);
   updateCheckedCount();
 }
@@ -791,8 +793,8 @@ function moveToCheckedIn(pid, sdId, groupId, payType, amount, voucherId) {
   tr.dataset.checkin     = JSON.stringify({sd_id: sdId, group_id: groupId ? parseInt(groupId) : null, payment_type: payType, amount: Math.round(amount), voucher_id: voucherId || null});
   tr.style.cssText       = 'cursor:pointer;user-select:none';
   tr.innerHTML = `<td><div class="fw-semibold">${name}</div></td>
-    <td>${sess ? sess.name : ''}</td>
-    <td class="text-muted">${grp ? grp.name : ''}</td>`;
+    <td>${sess ? sess.name : ''}</td>`
+    + (GROUPS_ENABLED ? `<td class="text-muted">${grp ? grp.name : ''}</td>` : '');
 
   insertCheckedInRow(tr);
   refreshEmptyStates();
@@ -824,8 +826,8 @@ function moveToWaiting(pid) {
   tr.dataset.checkin     = 'null';
   tr.style.cssText       = 'cursor:pointer;user-select:none';
   tr.innerHTML = `<td><div class="fw-semibold">${name}</div></td>
-    <td class="text-muted">${lastSession}</td>
-    <td class="text-muted">${lastGroup}</td>`;
+    <td class="text-muted">${lastSession}</td>`
+    + (GROUPS_ENABLED ? `<td class="text-muted">${lastGroup}</td>` : '');
 
   insertWaitingRow(tr);
   refreshEmptyStates();
@@ -862,7 +864,7 @@ function refreshEmptyStates() {
     if (!oldWait) {
       const tr = document.createElement('tr');
       tr.id = 'no-players-row';
-      tr.innerHTML = '<td colspan="3" class="text-center text-muted py-3 fst-italic small">All players checked in.</td>';
+      tr.innerHTML = `<td colspan="${ROW_COLS}" class="text-center text-muted py-3 fst-italic small">All players checked in.</td>`;
       waitBody.appendChild(tr);
     }
   } else if (oldWait) {
@@ -875,7 +877,7 @@ function refreshEmptyStates() {
     if (!oldCi) {
       const tr = document.createElement('tr');
       tr.id = 'no-checkedin-row';
-      tr.innerHTML = '<td colspan="3" class="text-center text-muted py-3 fst-italic small">No players checked in yet.</td>';
+      tr.innerHTML = `<td colspan="${ROW_COLS}" class="text-center text-muted py-3 fst-italic small">No players checked in yet.</td>`;
       ciBody.appendChild(tr);
     }
   } else if (oldCi) {

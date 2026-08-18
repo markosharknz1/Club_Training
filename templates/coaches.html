@@ -1,9 +1,9 @@
 {% extends 'base.html' %}
-{% block title %}Coaches — {{ club_name }}{% endblock %}
+{% block title %}Coach Database — {{ club_name }}{% endblock %}
 {% block content %}
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h5 class="mb-0 fw-bold">Coaches</h5>
+  <h5 class="mb-0 fw-bold">Coach Database</h5>
   <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addCoachModal">
     + Add Coach
   </button>
@@ -24,6 +24,16 @@
             {% if c.email %}
             <div class="small text-muted">{{ c.email }}</div>
             {% endif %}
+            {% set st = coach_stats.get(c.id) %}
+            <div class="small text-muted mt-2">
+              {% if st %}
+              {{ st.this_year }} session{{ 's' if st.this_year != 1 }} in {{ this_year }}
+              &nbsp;·&nbsp; {{ st.total }} all-time
+              &nbsp;·&nbsp; last coached {{ st.last.strftime('%d %b %Y') }}
+              {% else %}
+              No sessions coached yet.
+              {% endif %}
+            </div>
           </div>
           <div class="d-flex gap-1">
             <button class="btn btn-outline-secondary btn-sm py-0 px-2"

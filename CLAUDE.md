@@ -340,6 +340,38 @@ own machine and demo to other club members (e.g. "Carol").
     signed into a GitHub account with access (add collaborators under repo Settings → Access),
     or the repo must be made public — the release asset itself contains no club data either way.
 
+23. **Groups feature toggle.** Settings → Groups → "Use groups within sessions" switch
+    (`groups_enabled` Setting, default on, exposed app-wide via the context processor). When off,
+    every group picker/column/badge disappears: Plan Day group checkboxes, check-in modal group
+    select (hidden but present in DOM so the JS keeps working), Last Group / Group columns on the
+    check-in tables (the JS row-builders and empty-state colspans are group-aware via a
+    `GROUPS_ENABLED` const), Sessions setup Groups section, day-view badges, Players list
+    filter/column/add-modal select, player edit/detail, and the register pages. No data is
+    deleted — flipping back on restores everything. `day_checkin` also sends empty `groups`
+    arrays to the modal JS when off.
+24. **Coach Database.** The Coaches page was promoted from Setup → Coaches to a top-level
+    **Coach Database** nav item (parallel to Player Database; removed from the Setup dropdown).
+    Each coach card now shows sessions coached this year, all-time, and last-coached date
+    (computed in the `coaches()` route by walking `SessionDate.coaches`). Add/edit/deactivate
+    unchanged.
+
+25. **Email announcements (SMTP2GO).** Settings → **Email (SMTP2GO)** card: enable toggle (off
+    by default, same opt-in pattern as Square), SMTP host/port (defaults `mail.smtp2go.com:2525`),
+    username, write-only password (blank = keep), from address (must be a verified SMTP2GO
+    sender) and from name. New top-level **Email** nav page (`/email`, `templates/email.html`):
+    pick an audience window ("played in the last 1/3/6/12 months"), see the resolved recipient
+    list (juniors → guardian email first, seniors → own email first; **deduped by address so a
+    family with several kids gets one copy**) plus an explicit "no email on file" list, compose
+    subject + plain-text body, send. `_send_bulk_email()` sends one individual email per address
+    over a single STARTTLS SMTP connection — never a shared To/CC line, so parents' addresses
+    stay private from each other. Verified with a fake SMTP double (correct headers, dedupe,
+    graceful auth-failure handling); **not yet tested against real SMTP2GO credentials**.
+    ⚠️ The imported GBC juniors have **no email addresses** (the juniors spreadsheet had none),
+    so the recipient list is empty until guardian emails are added — either via Player Database →
+    Edit, or a future CSV/Excel re-import that includes an email column (the player importer
+    already maps `guardian_email`, but note it skips existing names, so an email-updating
+    re-import would need an update-in-place mode that doesn't exist yet).
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually
