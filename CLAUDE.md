@@ -325,6 +325,17 @@ own machine and demo to other club members (e.g. "Carol").
     tweak by redrawing at 512px and re-saving with `sizes=[...]`). Baked into the exe via
     `--icon` in `build_exe.bat`; for a shortcut to `run.bat` on the dev machine, point the
     shortcut's Change Icon dialog at that file.
+    **Distribution via GitHub Releases** (the user's preferred "download from GitHub" flow —
+    Code → Download ZIP only ever gives source, so built apps ship as release assets instead;
+    first release: v1.0.0). To publish a new version after code changes:
+    1. `build_exe.bat` (fresh exe in `dist\Club_Training\`)
+    2. confirm no `*.db`/`backups/` inside `dist\Club_Training\` (never ship data)
+    3. `Compress-Archive -Path dist\Club_Training -DestinationPath dist\Club_Training_vX.Y.Z_windows.zip -Force`
+    4. `gh release create vX.Y.Z dist\Club_Training_vX.Y.Z_windows.zip --title "Club Training vX.Y.Z" --notes "..."`
+    Downloaders: repo page → Releases (right-hand side) → download the zip → unzip →
+    double-click `Club_Training.exe`. Note the repo is **private**, so downloaders must be
+    signed into a GitHub account with access (add collaborators under repo Settings → Access),
+    or the repo must be made public — the release asset itself contains no club data either way.
 
 ## Known open items (not yet built — need user input before building)
 
