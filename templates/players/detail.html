@@ -41,6 +41,13 @@
           {% endif %}
           <dt class="col-5 text-muted">Total attended</dt>
           <dd class="col-7">{{ player.total_attended }} sessions</dd>
+          {% if player.membership_type or player.rego_number %}
+          <dt class="col-5 text-muted">Membership</dt>
+          <dd class="col-7">
+            {{ player.membership_type or '—' }}{% if player.membership_status %} · {{ player.membership_status }}{% endif %}
+            {% if player.rego_number %}<span class="text-muted">(rego {{ player.rego_number }})</span>{% endif %}
+          </dd>
+          {% endif %}
           {% if player.notes %}
           <dt class="col-5 text-muted">Notes</dt>
           <dd class="col-7">{{ player.notes }}</dd>

@@ -118,6 +118,9 @@ class Player(db.Model):
     guardian_email     = db.Column(db.String(150))
     medicare_number    = db.Column(db.String(30))
     category           = db.Column(db.String(10), default='Junior', nullable=False)  # Junior | Senior
+    rego_number        = db.Column(db.String(20))   # club registration number, from the member register
+    membership_type    = db.Column(db.String(30))   # e.g. Junior / Social / Comp A-C
+    membership_status  = db.Column(db.String(30))   # e.g. Paid
     address            = db.Column(db.String(250))
     own_email          = db.Column(db.String(150))
     own_phone          = db.Column(db.String(30))

@@ -24,6 +24,12 @@
         Only the name is required. Marker characters like <code>^</code> in names are stripped.
         Names already in the database are skipped, so re-importing is safe.
       </p>
+      <p class="text-muted small mb-3">
+        <strong>Membership registers</strong> (files with <code>Rego #</code> / <code>Mbshp Type</code> /
+        <code>Status</code> columns) are handled specially: matched players are <em>updated</em> with
+        their membership details, and members not yet in the database are added as new players
+        (Junior type → Junior, everything else → Senior).
+      </p>
       <pre class="bg-light p-2 rounded small mb-3">name,age,category,guardian_name,guardian_phone,guardian_email
 Alex Smith,9,Junior,Jane Smith,0211234567,jane@example.com
 Sam Lee,11,Junior,,0227654321,</pre>

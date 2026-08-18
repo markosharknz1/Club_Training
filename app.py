@@ -117,6 +117,11 @@ def create_app():
         if 'own_phone' not in player_cols:
             db.session.execute(db.text("ALTER TABLE players ADD COLUMN own_phone VARCHAR(30)"))
             db.session.commit()
+        if 'rego_number' not in player_cols:
+            db.session.execute(db.text("ALTER TABLE players ADD COLUMN rego_number VARCHAR(20)"))
+            db.session.execute(db.text("ALTER TABLE players ADD COLUMN membership_type VARCHAR(30)"))
+            db.session.execute(db.text("ALTER TABLE players ADD COLUMN membership_status VARCHAR(30)"))
+            db.session.commit()
         session_tmpl_cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(session_templates)")).fetchall()]
         if 'category' not in session_tmpl_cols:
             db.session.execute(db.text("ALTER TABLE session_templates ADD COLUMN category VARCHAR(10) NOT NULL DEFAULT 'Mixed'"))
@@ -482,6 +487,9 @@ def create_app():
                 'guardian_name':  {'guardian', 'guardian name', 'parent', 'parent name'},
                 'guardian_phone': {'guardian phone', 'phone', 'contact', 'guardian contact'},
                 'guardian_email': {'guardian email', 'email'},
+                'rego':              {'rego', 'rego #', 'rego number', 'registration', 'member #', 'member number'},
+                'membership_type':   {'mbshp type', 'membership type'},
+                'membership_status': {'status', 'membership status'},
             }
             header_cells = [str(h or '').strip().lower().replace('_', ' ') for h in rows[0]]
             col = {}
@@ -499,7 +507,52 @@ def create_app():
                 j = col.get(field)
                 if j is None or j >= len(row) or row[j] is None:
                     return ''
-                return str(row[j]).strip()
+                v = str(row[j]).strip()
+                return v[:-2] if v.endswith('.0') else v
+
+            # ── Membership-register mode ─────────────────────────────
+            # A file with Rego/Membership columns (e.g. the club's member
+            # export) UPDATES matched players in place and ADDS unmatched
+            # members as new players, rather than skipping existing names.
+            if 'rego' in col or 'membership_type' in col:
+                find_player, fuzzy_notes = _build_player_matcher(Player.query.all())
+                updated, added, skipped = 0, 0, 0
+                for row in rows[1:]:
+                    name = _clean_person_name(
+                        cell(row, 'name') or f"{cell(row, 'given')} {cell(row, 'surname')}")
+                    if not name:
+                        skipped += 1
+                        continue
+                    rego    = cell(row, 'rego') or None
+                    mtype   = cell(row, 'membership_type') or None
+                    mstatus = cell(row, 'membership_status') or None
+                    p = find_player(name)
+                    if p:
+                        p.rego_number       = rego or p.rego_number
+                        p.membership_type   = mtype or p.membership_type
+                        p.membership_status = mstatus or p.membership_status
+                        updated += 1
+                    else:
+                        # Tidy SHOUTING surnames from the register (KIM ATKINS → Kim Atkins)
+                        display = ' '.join(w.title() if w.isupper() and len(w) > 1 else w
+                                           for w in name.split())
+                        db.session.add(Player(
+                            name=display,
+                            category='Junior' if (mtype or '').lower() == 'junior' else 'Senior',
+                            rego_number=rego, membership_type=mtype, membership_status=mstatus,
+                        ))
+                        added += 1
+                db.session.commit()
+                msg = (f'Membership register: updated {updated} existing player'
+                       f'{"s" if updated != 1 else ""}, added {added} new member'
+                       f'{"s" if added != 1 else ""} as players.')
+                if skipped:
+                    msg += f' {skipped} row{"s" if skipped != 1 else ""} skipped (missing name).'
+                if fuzzy_notes:
+                    msg += (f' {len(fuzzy_notes)} matched by name similarity — please check: '
+                            + '; '.join(sorted(set(fuzzy_notes))) + '.')
+                flash(msg, 'success')
+                return redirect(url_for('players'))
 
             added, skipped = 0, 0
             duplicates = []
@@ -1959,7 +2012,7 @@ def _build_player_matcher(players):
             r1 = difflib.SequenceMatcher(None, n, close[0]).ratio()
             r2 = difflib.SequenceMatcher(None, n, close[1]).ratio() if len(close) > 1 else 0.0
             first_sim = difflib.SequenceMatcher(None, toks[0], close[0].split()[0]).ratio()
-            if r1 >= 0.88 and (r1 - r2) >= 0.04 and first_sim >= 0.8:
+            if r1 >= 0.90 and (r1 - r2) >= 0.04 and first_sim >= 0.8:
                 p = by_norm[close[0]][0]
                 fuzzy_notes.append(f'"{_clean_person_name(raw)}" matched to {p.name}')
                 return p

@@ -398,6 +398,19 @@ own machine and demo to other club members (e.g. "Carol").
     backups are write-once copies, so syncing them is safe. (An earlier LOCALAPPDATA mirror was
     superseded by Documents; copies already there remain as a bonus archive.)
 
+28. **Membership register import** (built for `E:\GBC\GBC Member 31Jul26 for Mark.xlsx` —
+    columns `Rego #`, `Full Name`, gender, `Mbshp Type` (Junior/Social/Comp A–C), `Status`).
+    `Player` gains `rego_number` / `membership_type` / `membership_status` (add-only migration),
+    shown as a "Membership" row on the player detail page. `/players/import` detects
+    rego/membership columns and switches modes: matched players are **updated in place** (no
+    skip-existing), unmatched members are **added** as new players (Junior type → Junior, all
+    else → Senior; ALL-CAPS surnames from the register are title-cased). Live result: 10 existing
+    juniors updated, 107 members added → 272 players (171 Junior / 101 Senior), 117 with rego
+    numbers. The fuzzy-match full-name cutoff was raised **0.88 → 0.90** after the dry run caught
+    a false positive ("Leo ZHANG" → "Leo Huang" scores 0.889 — different people); all known-good
+    typo matches score ≥ 0.92 and still pass. Always dry-run imports against a copy of the DB
+    before touching the live one.
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually
