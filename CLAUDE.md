@@ -411,6 +411,19 @@ own machine and demo to other club members (e.g. "Carol").
     typo matches score ≥ 0.92 and still pass. Always dry-run imports against a copy of the DB
     before touching the live one.
 
+29. **Manage Database panel** (⚙ button on the Player Database page, modal in
+    `players/list.html`): two admin tools. **Merge duplicate players**
+    (`POST /players/merge`): moves the duplicate's attendance to the keeper (same-session-date
+    conflicts keep the keeper's record and drop the duplicate's), moves vouchers, re-points
+    sibling links, fills the keeper's blank fields from the duplicate (never overwrites),
+    appends notes, keeps `active` if either was active, then deletes the duplicate — built for
+    cases like the register's "Gursangeet KHARA"/"Gersangeet Khara" spelling variants.
+    **Permanently delete a player** (`POST /players/delete`): removes the player + all
+    attendance + vouchers + sibling links — for junk entries only; the modal text steers
+    "player left the club" cases to Edit → inactive instead. Both have strong JS confirms.
+    Tested end-to-end against a temp copy of the DB (the post-incident standard for anything
+    destructive).
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

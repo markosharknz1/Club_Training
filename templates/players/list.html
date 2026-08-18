@@ -5,6 +5,7 @@
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <h5 class="mb-0 fw-bold">Players</h5>
   <div class="d-flex gap-2">
+    <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#manageModal">⚙ Manage Database</button>
     <a href="/players/import" class="btn btn-outline-secondary btn-sm">↑ Import CSV</a>
     <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addModal">+ Add Player</button>
   </div>
@@ -213,11 +214,100 @@
   </div>
 </div>
 
+{# ── Manage Database modal ── #}
+<div class="modal fade" id="manageModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Manage Database</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <h6 class="fw-bold">Merge duplicate players</h6>
+        <p class="text-muted small">Moves all attendance, vouchers and sibling links from the
+          duplicate onto the player you keep, fills in any blank details from the duplicate,
+          then removes the duplicate. Use when the same person exists twice under
+          slightly different names.</p>
+        <form method="post" action="/players/merge" id="merge-form"
+              onsubmit="return confirmMerge(this)">
+          <div class="mb-2">
+            <label class="form-label small fw-semibold mb-1">Keep this player</label>
+            <select name="keep_id" class="form-select form-select-sm" required>
+              <option value="">— select —</option>
+              {% for p in manage_players %}
+              <option value="{{ p.id }}">{{ p.name }}{{ ' (inactive)' if not p.active }} — {{ p.category }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-2">
+            <label class="form-label small fw-semibold mb-1">Merge &amp; remove this duplicate</label>
+            <select name="remove_id" class="form-select form-select-sm" required>
+              <option value="">— select —</option>
+              {% for p in manage_players %}
+              <option value="{{ p.id }}">{{ p.name }}{{ ' (inactive)' if not p.active }} — {{ p.category }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm">Merge</button>
+        </form>
+
+        <hr>
+
+        <h6 class="fw-bold text-danger">Permanently delete a player</h6>
+        <p class="text-muted small">Removes the player and <strong>all</strong> their attendance
+          and vouchers. Cannot be undone from the app (daily backups are your safety net).
+          For genuine mistakes/junk entries — for players who have simply left, use
+          Edit → untick Active instead, which keeps their history.</p>
+        <form method="post" action="/players/delete" id="delete-form"
+              onsubmit="return confirmDelete(this)">
+          <div class="mb-2">
+            <select name="player_id" class="form-select form-select-sm" required>
+              <option value="">— select —</option>
+              {% for p in manage_players %}
+              <option value="{{ p.id }}">{{ p.name }}{{ ' (inactive)' if not p.active }} — {{ p.category }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="btn btn-outline-danger btn-sm">Permanently Delete</button>
+        </form>
+
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
 const FIELD_CFG = {{ field_cfg | tojson }};
+
+// ── Manage Database confirms ─────────────────────────────────────────
+function selText(sel) {
+  return sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text.trim() : '';
+}
+function confirmMerge(form) {
+  const keep = form.querySelector('[name="keep_id"]');
+  const rem  = form.querySelector('[name="remove_id"]');
+  if (keep.value === rem.value) {
+    alert('Pick two different players.');
+    return false;
+  }
+  return confirm(`Merge "${selText(rem)}" INTO "${selText(keep)}"?
+
+` +
+    `All of "${selText(rem)}"'s attendance, vouchers and siblings move to ` +
+    `"${selText(keep)}", then "${selText(rem)}" is removed. Continue?`);
+}
+function confirmDelete(form) {
+  const sel = form.querySelector('[name="player_id"]');
+  return confirm(`PERMANENTLY delete "${selText(sel)}" and ALL their history?
+
+` +
+    'This cannot be undone from the app. If they have just left the club, ' +
+    'use Edit → untick Active instead. Really delete?');
+}
 const ALL_PLAYER_NAMES = new Set({{ all_player_names | map('lower') | list | tojson }});
 
 // Soft duplicate warning when adding a player whose name already exists

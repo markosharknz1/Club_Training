@@ -416,6 +416,7 @@ def create_app():
                                all_active_players=all_active_players,
                                all_player_names=all_player_names,
                                stale_players=stale_players,
+                               manage_players=Player.query.order_by(Player.name).all(),
                                last_attendance_map=last_attendance_map,
                                field_cfg=_player_field_settings(),
                                q=q, session_id=session_id, group_id=group_id,
@@ -433,6 +434,107 @@ def create_app():
         db.session.commit()
         flash(f'{count} player{"s" if count != 1 else ""} marked inactive. '
               'They keep their history and can be reactivated any time via Edit.', 'success')
+        return redirect(url_for('players'))
+
+    @app.route('/players/merge', methods=['POST'])
+    def players_merge():
+        """Merge a duplicate player into a keeper: move attendance, vouchers
+        and sibling links across, fill in the keeper's blank fields from the
+        duplicate, then delete the duplicate."""
+        keep_id   = request.form.get('keep_id', type=int)
+        remove_id = request.form.get('remove_id', type=int)
+        if not keep_id or not remove_id or keep_id == remove_id:
+            flash('Pick two different players to merge.', 'danger')
+            return redirect(url_for('players'))
+        keep = db.session.get(Player, keep_id)
+        rem  = db.session.get(Player, remove_id)
+        if not keep or not rem:
+            flash('Player not found.', 'danger')
+            return redirect(url_for('players'))
+
+        # Attendance: move across; where both attended the same session date,
+        # keep the keeper's record and drop the duplicate's.
+        keep_sds = {a.session_date_id for a in keep.attendance_records}
+        moved_att, dropped_att = 0, 0
+        for a in Attendance.query.filter_by(player_id=remove_id).all():
+            if a.session_date_id in keep_sds:
+                db.session.delete(a)
+                dropped_att += 1
+            else:
+                a.player_id = keep_id
+                moved_att += 1
+
+        moved_vouchers = 0
+        for v in Voucher.query.filter_by(player_id=remove_id).all():
+            v.player_id = keep_id
+            moved_vouchers += 1
+
+        # Sibling links: re-point the duplicate's siblings at the keeper.
+        rows = db.session.execute(sibling_links.select().where(
+            (sibling_links.c.player_a_id == remove_id) |
+            (sibling_links.c.player_b_id == remove_id))).fetchall()
+        partners = {(r.player_a_id if r.player_b_id == remove_id else r.player_b_id) for r in rows}
+        db.session.execute(sibling_links.delete().where(
+            (sibling_links.c.player_a_id == remove_id) |
+            (sibling_links.c.player_b_id == remove_id)))
+        existing_partners = {s.id for s in keep.siblings}
+        for pid in partners:
+            if pid != keep_id and pid not in existing_partners:
+                db.session.execute(sibling_links.insert().values(
+                    player_a_id=keep_id, player_b_id=pid))
+
+        # Fill the keeper's blanks from the duplicate; never overwrite.
+        filled = []
+        for f in ('date_of_birth', 'guardian_name', 'guardian_phone', 'guardian_email',
+                  'address', 'own_email', 'own_phone', 'rego_number', 'membership_type',
+                  'membership_status', 'default_session_id', 'default_group_id'):
+            if not getattr(keep, f) and getattr(rem, f):
+                setattr(keep, f, getattr(rem, f))
+                filled.append(f)
+        if rem.notes and rem.notes != keep.notes:
+            keep.notes = f'{keep.notes} | {rem.notes}' if keep.notes else rem.notes
+        keep.active = keep.active or rem.active
+
+        removed_name = rem.name
+        db.session.flush()
+        db.session.delete(rem)
+        db.session.commit()
+
+        msg = (f'Merged "{removed_name}" into "{keep.name}": moved {moved_att} attendance '
+               f'record{"s" if moved_att != 1 else ""}')
+        if dropped_att:
+            msg += f' ({dropped_att} duplicate same-day record{"s" if dropped_att != 1 else ""} dropped)'
+        if moved_vouchers:
+            msg += f', {moved_vouchers} voucher{"s" if moved_vouchers != 1 else ""}'
+        if filled:
+            msg += f', filled in {len(filled)} blank field{"s" if len(filled) != 1 else ""}'
+        flash(msg + '.', 'success')
+        return redirect(url_for('player_detail', pid=keep_id))
+
+    @app.route('/players/delete', methods=['POST'])
+    def players_delete():
+        """Permanently delete a player and ALL their history. Irreversible
+        (apart from the daily backups) — meant for junk/mistake entries."""
+        pid = request.form.get('player_id', type=int)
+        p = db.session.get(Player, pid) if pid else None
+        if not p:
+            flash('Player not found.', 'danger')
+            return redirect(url_for('players'))
+        name = p.name
+        n_att = Attendance.query.filter_by(player_id=pid).count()
+        vouchers = Voucher.query.filter_by(player_id=pid).all()
+        for v in vouchers:
+            Attendance.query.filter_by(voucher_id=v.id).update(
+                {'voucher_id': None}, synchronize_session=False)
+            db.session.delete(v)
+        db.session.execute(sibling_links.delete().where(
+            (sibling_links.c.player_a_id == pid) |
+            (sibling_links.c.player_b_id == pid)))
+        db.session.delete(p)   # attendance cascades with the player
+        db.session.commit()
+        flash(f'Permanently deleted "{name}" ({n_att} attendance record{"s" if n_att != 1 else ""}, '
+              f'{len(vouchers)} voucher{"s" if len(vouchers) != 1 else ""}). '
+              'If this was a mistake, restore from a backup in the backups folder.', 'warning')
         return redirect(url_for('players'))
 
     @app.route('/players/add', methods=['POST'])
