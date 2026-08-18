@@ -97,7 +97,7 @@
     </div>
 
     <div class="card shadow-sm border-0 mb-3" id="edit-parent-block">
-      <div class="card-header fw-semibold">Guardian / Contact</div>
+      <div class="card-header fw-semibold" id="edit-parent-title">Guardian / Contact</div>
       <div class="card-body">
         <div class="row g-3">
           <div class="col-12">
@@ -167,6 +167,16 @@ function applyFieldVisibility(prefix, category) {
   set('-address-field', cfg.address);
   set('-own-email-field', cfg.email);
   set('-own-phone-field', cfg.phone);
+  // Same stored fields, different meaning per category
+  const senior = category === 'Senior';
+  const relabel = (id, text) => {
+    const el = document.getElementById(prefix + id);
+    if (el) el.textContent = text;
+  };
+  relabel('-parent-title', senior ? 'Emergency Contact' : 'Guardian / Contact');
+  relabel('-guardian-name-label',  senior ? 'Emergency contact name'  : 'Guardian name');
+  relabel('-guardian-phone-label', senior ? 'Emergency contact phone' : 'Guardian phone');
+  relabel('-guardian-email-label', senior ? 'Emergency contact email' : 'Guardian email');
 }
 document.addEventListener('DOMContentLoaded', () => applyFieldVisibility('edit', document.getElementById('edit-category').value));
 

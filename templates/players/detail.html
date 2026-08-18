@@ -81,7 +81,7 @@
   {% if cfg.parent_contact %}
   <div class="col-md-4">
     <div class="card shadow-sm border-0 h-100">
-      <div class="card-header fw-semibold">Guardian / Contact</div>
+      <div class="card-header fw-semibold">{{ 'Emergency Contact' if player.category == 'Senior' else 'Guardian / Contact' }}</div>
       <div class="card-body">
         <dl class="row mb-0 small">
           <dt class="col-5 text-muted">Name</dt>

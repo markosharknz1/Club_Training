@@ -23,6 +23,15 @@
 {# Audience picker #}
 <form method="get" action="/email" class="row g-2 align-items-end mb-3">
   <div class="col-auto">
+    <label class="form-label small fw-semibold mb-1">Session</label>
+    <select name="session_id" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">All sessions</option>
+      {% for s in all_sessions %}
+      <option value="{{ s.id }}" {% if session_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
     <label class="form-label small fw-semibold mb-1">Played in the last</label>
     <select name="months" class="form-select form-select-sm" onchange="this.form.submit()">
       <option value="1"  {% if months==1  %}selected{% endif %}>1 month</option>
@@ -78,6 +87,7 @@
         <form method="post" action="/email/send"
               onsubmit="return confirm('Send this email to {{ email_map | length }} address{{ 'es' if email_map|length != 1 }}?')">
           <input type="hidden" name="months" value="{{ months }}">
+          <input type="hidden" name="session_id" value="{{ session_id or '' }}">
           <div class="mb-3">
             <label class="form-label fw-semibold">Subject <span class="text-danger">*</span></label>
             <input type="text" name="subject" class="form-control" required

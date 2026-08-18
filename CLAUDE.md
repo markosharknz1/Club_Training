@@ -372,6 +372,32 @@ own machine and demo to other club members (e.g. "Carol").
     already maps `guardian_email`, but note it skips existing names, so an email-updating
     re-import would need an update-in-place mode that doesn't exist yet).
 
+26. **Email session filter + Senior "Emergency contact" relabel.** The Email page audience picker
+    gained a Session dropdown (`_recent_player_emails(months, session_id)`; the filter is carried
+    through the send form as a hidden field) — different sessions have different audiences, so a
+    tournament notice can target just one session's players. Separately, the guardian_* fields
+    keep their DB names but are **labelled by category**: "Guardian …" for Juniors, "Emergency
+    contact …" for Seniors — server-side on the player detail page, JS-swapped in
+    `applyFieldVisibility()` (all three copies) on the add/edit forms, and the Settings checkbox
+    for Seniors reads "Track emergency contact".
+27. **⚠ DATA-LOSS INCIDENT (2026-08-18) + backup hardening.** A cleanup command intended for
+    `dist\` (`rm -f badminton.db && rm -rf backups`) ran in the project root instead — the
+    `cd X && exe &` line before it backgrounded the *whole* chain including the `cd`, so the
+    shell's cwd never changed. The live DB and all backups were deleted in one stroke; recovery
+    was only possible because the club hadn't gone live and everything real could be re-imported
+    from `E:\GBC` (165 players + 30 voucher balances re-imported identically; sessions/groups/
+    coaches/settings rebuilt by hand). **Never run destructive commands with relative paths —
+    see the `feedback-destructive-command-safety` memory.** Hardening added: `_backup_database()`
+    now writes daily backups to **two independent locations** — `backups/` beside the app AND
+    `Documents\Club_Training Backups\` — so no single folder deletion can take out the data
+    and every backup together. One location failing never blocks the other. Documents is
+    resolved via the registry (`User Shell Folders\Personal`) because OneDrive redirects it —
+    on this machine backups land in `C:\Users\mhami\OneDrive\Documents\Club_Training Backups\`,
+    so **OneDrive syncs them to the cloud** for genuine off-machine protection. The LIVE
+    database must still never live in OneDrive (sync corrupts actively-written SQLite files);
+    backups are write-once copies, so syncing them is safe. (An earlier LOCALAPPDATA mirror was
+    superseded by Documents; copies already there remain as a bonus archive.)
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

@@ -166,15 +166,15 @@
         </div>
         <div id="edit-parent-block">
           <div class="mb-3">
-            <label class="form-label fw-semibold">Guardian name</label>
+            <label class="form-label fw-semibold" id="edit-guardian-name-label">Guardian name</label>
             <input type="text" id="edit-guardian-name" class="form-control" autocomplete="off">
           </div>
           <div class="mb-3">
-            <label class="form-label fw-semibold">Guardian phone</label>
+            <label class="form-label fw-semibold" id="edit-guardian-phone-label">Guardian phone</label>
             <input type="text" id="edit-guardian-phone" class="form-control" autocomplete="off">
           </div>
           <div class="mb-3">
-            <label class="form-label fw-semibold">Guardian email</label>
+            <label class="form-label fw-semibold" id="edit-guardian-email-label">Guardian email</label>
             <input type="email" id="edit-guardian-email" class="form-control" autocomplete="off">
           </div>
         </div>
@@ -349,6 +349,16 @@ function applyFieldVisibility(prefix, category) {
   set('-address-field', cfg.address);
   set('-own-email-field', cfg.email);
   set('-own-phone-field', cfg.phone);
+  // Same stored fields, different meaning per category
+  const senior = category === 'Senior';
+  const relabel = (id, text) => {
+    const el = document.getElementById(prefix + id);
+    if (el) el.textContent = text;
+  };
+  relabel('-parent-title', senior ? 'Emergency Contact' : 'Guardian / Contact');
+  relabel('-guardian-name-label',  senior ? 'Emergency contact name'  : 'Guardian name');
+  relabel('-guardian-phone-label', senior ? 'Emergency contact phone' : 'Guardian phone');
+  relabel('-guardian-email-label', senior ? 'Emergency contact email' : 'Guardian email');
 }
 
 let selectedSdId      = null;

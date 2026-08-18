@@ -21,23 +21,53 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
 
 # ─── App factory ────────────────────────────────────────────────────
 
+def _documents_dir():
+    """The user's real Documents folder. On OneDrive-managed machines Documents
+    is redirected (e.g. C:\\Users\\x\\OneDrive\\Documents), so resolve it from
+    the registry rather than assuming ~/Documents."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                r'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders') as key:
+            value, _type = winreg.QueryValueEx(key, 'Personal')
+        return os.path.expandvars(value)
+    except OSError:
+        return os.path.join(os.path.expanduser('~'), 'Documents')
+
+
+def _backup_dirs():
+    """Two independent backup locations: one beside the app, and one in the
+    user's Documents folder — which on OneDrive-backed machines syncs the
+    backups to the cloud. (The LIVE database must never live in OneDrive —
+    sync can corrupt a file that's actively written — but backups are
+    write-once copies, so syncing them is safe and gives off-machine
+    protection.) No single folder deletion can destroy the data AND every
+    backup of it at the same time."""
+    return [os.path.join(config.BASE_DIR, 'backups'),
+            os.path.join(_documents_dir(), 'Club_Training Backups')]
+
+
 def _backup_database(keep=30):
-    """Daily safety copy of the SQLite file into backups/, keeping the newest `keep`.
-    Runs before the app touches the database, so even a bad migration can't damage
-    a file that hasn't been backed up first."""
+    """Daily safety copy of the SQLite file into each backup location,
+    keeping the newest `keep` in each. Runs before the app touches the
+    database, so even a bad migration can't damage a file that hasn't
+    been backed up first."""
     if not os.path.exists(config.DB_PATH):
         return
-    backup_dir = os.path.join(config.BASE_DIR, 'backups')
-    os.makedirs(backup_dir, exist_ok=True)
-    dest = os.path.join(backup_dir, f'badminton_{date.today().isoformat()}.db')
-    if not os.path.exists(dest):
-        shutil.copy2(config.DB_PATH, dest)
-    old_backups = sorted(glob.glob(os.path.join(backup_dir, 'badminton_*.db')))
-    for old in old_backups[:-keep]:
+    for backup_dir in _backup_dirs():
         try:
-            os.remove(old)
+            os.makedirs(backup_dir, exist_ok=True)
+            dest = os.path.join(backup_dir, f'badminton_{date.today().isoformat()}.db')
+            if not os.path.exists(dest):
+                shutil.copy2(config.DB_PATH, dest)
+            old_backups = sorted(glob.glob(os.path.join(backup_dir, 'badminton_*.db')))
+            for old in old_backups[:-keep]:
+                try:
+                    os.remove(old)
+                except OSError:
+                    pass
         except OSError:
-            pass
+            continue  # one location failing must never block the other
 
 
 def _resource_dir():
@@ -1475,10 +1505,15 @@ def create_app():
 
     @app.route('/email')
     def email_players():
-        months = request.args.get('months', 3, type=int)
-        email_map, missing = _recent_player_emails(months)
+        months     = request.args.get('months', 3, type=int)
+        session_id = request.args.get('session_id', type=int)
+        email_map, missing = _recent_player_emails(months, session_id)
+        all_sessions = (SessionTemplate.query.filter_by(active=True)
+                        .order_by(SessionTemplate.day_of_week, SessionTemplate.start_time).all())
         return render_template('email.html',
-                               months=months, email_map=email_map, missing=missing,
+                               months=months, session_id=session_id,
+                               all_sessions=all_sessions,
+                               email_map=email_map, missing=missing,
                                email_configured=_email_configured())
 
     @app.route('/email/send', methods=['POST'])
@@ -1487,29 +1522,30 @@ def create_app():
             flash('Email is not set up yet — add your SMTP2GO details in Club Settings first.', 'danger')
             return redirect(url_for('email_players'))
 
-        months  = request.form.get('months', 3, type=int)
-        subject = request.form.get('subject', '').strip()
-        body    = request.form.get('body', '').strip()
+        months     = request.form.get('months', 3, type=int)
+        session_id = request.form.get('session_id', type=int)
+        subject    = request.form.get('subject', '').strip()
+        body       = request.form.get('body', '').strip()
         if not subject or not body:
             flash('Subject and message are both required.', 'danger')
-            return redirect(url_for('email_players', months=months))
+            return redirect(url_for('email_players', months=months, session_id=session_id))
 
-        email_map, _ = _recent_player_emails(months)
+        email_map, _ = _recent_player_emails(months, session_id)
         if not email_map:
             flash('No recipients found for that period.', 'warning')
-            return redirect(url_for('email_players', months=months))
+            return redirect(url_for('email_players', months=months, session_id=session_id))
 
         try:
             sent, failures = _send_bulk_email(subject, body, list(email_map.keys()))
         except (smtplib.SMTPException, OSError) as e:
             flash(f'Could not send: {e} — check the SMTP details in Club Settings.', 'danger')
-            return redirect(url_for('email_players', months=months))
+            return redirect(url_for('email_players', months=months, session_id=session_id))
 
         msg = f'Sent to {sent} address{"es" if sent != 1 else ""}.'
         if failures:
             msg += f' {len(failures)} failed: {", ".join(failures[:5])}{"…" if len(failures) > 5 else ""}.'
         flash(msg, 'success' if sent and not failures else 'warning')
-        return redirect(url_for('email_players', months=months))
+        return redirect(url_for('email_players', months=months, session_id=session_id))
 
     # ── Export ───────────────────────────────────────────────────────
 
@@ -1939,14 +1975,18 @@ def _email_configured():
             and bool(Setting.get('email_from', '')))
 
 
-def _recent_player_emails(months):
-    """Players who attended in the last `months` months → best contact email.
-    Juniors use guardian email first; Seniors their own email first. Returns
-    (email_map: email → [player names], missing: [player names with no email])."""
+def _recent_player_emails(months, session_id=None):
+    """Players who attended in the last `months` months (optionally only a
+    specific session) → best contact email. Juniors use guardian email first;
+    Seniors their own email first. Returns (email_map: email → [player names],
+    missing: [player names with no email])."""
     cutoff = date.today() - timedelta(days=months * 30)
-    pids = {pid for (pid,) in db.session.query(Attendance.player_id)
-            .join(SessionDate, Attendance.session_date_id == SessionDate.id)
-            .filter(SessionDate.date >= cutoff).distinct()}
+    q = (db.session.query(Attendance.player_id)
+         .join(SessionDate, Attendance.session_date_id == SessionDate.id)
+         .filter(SessionDate.date >= cutoff))
+    if session_id:
+        q = q.filter(SessionDate.session_id == session_id)
+    pids = {pid for (pid,) in q.distinct()}
     email_map, missing = OrderedDict(), []
     for p in (Player.query.filter(Player.id.in_(pids), Player.active == True)
               .order_by(Player.name).all() if pids else []):
