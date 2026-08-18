@@ -2097,7 +2097,26 @@ def _wait_for_server(port, timeout=5):
     return False
 
 
+def _unblock_bundle():
+    """Strip Windows 'downloaded from the internet' marks (Zone.Identifier
+    streams) from every bundled file. When the app is distributed as a zip
+    (e.g. GitHub Releases), Windows tags the extracted files as untrusted and
+    .NET then refuses to load our bundled DLLs — crashing the native window
+    with 'Failed to resolve Python.Runtime.Loader.Initialize'. Clearing the
+    marks up front makes a downloaded copy behave like a locally built one."""
+    if not getattr(sys, 'frozen', False):
+        return
+    base = os.path.dirname(sys.executable)
+    for root, _dirs, files in os.walk(base):
+        for fn in files:
+            try:
+                os.remove(os.path.join(root, fn) + ':Zone.Identifier')
+            except OSError:
+                pass  # no mark on this file — the normal case
+
+
 if __name__ == '__main__':
+    _unblock_bundle()
     _tested_versions = ((3, 9), (3, 14))  # inclusive range this app has been tested against
     if not (_tested_versions[0] <= sys.version_info[:2] <= _tested_versions[1]):
         print(f'  Note: this app was built and tested on Python 3.12. You are running '
@@ -2124,11 +2143,12 @@ if __name__ == '__main__':
         webview.create_window(club_name, f'http://127.0.0.1:{port}',
                               width=1280, height=850, min_size=(1000, 650))
         webview.start()
-    except ImportError:
-        print('  Desktop window unavailable — pywebview is not installed.')
-        print('  Run install.bat to add it (pywebview), then restart for a proper app window.')
-        print('  Falling back to your default browser for now.\n')
+    except Exception as e:
+        # Never die with an error dialog just because the native window
+        # couldn't start — the app itself is fine, so serve it in the
+        # default browser instead.
+        print(f'  Desktop window unavailable ({e.__class__.__name__}: {e}).')
+        print('  Falling back to your default browser.\n')
         webbrowser.open(f'http://localhost:{port}')
-        print(f'  Badminton Club running at http://localhost:{port}')
-        print('  Close this window (or press Ctrl+C) to stop.\n')
+        print(f'  {club_name} running at http://localhost:{port}')
         server_thread.join()
