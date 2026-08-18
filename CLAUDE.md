@@ -12,7 +12,10 @@ own machine and demo to other club members (e.g. "Carol").
 - **GitHub:** private repo at https://github.com/markosharknz1/Club_Training (renamed from
   `BadmintonClub` via `gh repo rename`; `git remote origin` was updated automatically, branch
   `master`). Push only when the user explicitly asks ("push to github please").
-- **Run it:** `run.bat` (runs `python app.py`). The Flask server still runs internally on
+- **Run it:** `run.bat` (launches via `pythonw` — **windowless**, no console; closing the app
+  window stops everything). `run_debug.bat` is the same launch with a visible console for
+  troubleshooting. A "Club Training" desktop shortcut (pythonw target, app icon) exists on the
+  user's Desktop. The Flask server still runs internally on
   `127.0.0.1` (no LAN/firewall exposure), but it's launched in a background thread and displayed
   in a **native desktop window via `pywebview`** — no browser tab, no URL bar, no need for
   Chrome/Edge/Firefox to be installed separately. It looks and feels like a real desktop app.
