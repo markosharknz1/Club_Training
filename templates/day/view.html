@@ -111,44 +111,125 @@
 
 {# ── Coaches ───────────────────────────────────────────────────────── #}
 <div class="card shadow-sm border-0 mb-4">
-  <div class="card-header fw-bold">Coaches Present</div>
+  <div class="card-header fw-bold d-flex justify-content-between align-items-center">
+    <span>Coaches Present</span>
+    {% if month_finalised %}
+    <span class="badge bg-warning text-dark">{{ d.strftime('%B') }} pay finalised</span>
+    {% endif %}
+  </div>
   {% if coaches %}
-  <form method="post" action="/day/{{ d.isoformat() }}/coaches">
-    <div class="table-responsive">
-      <table class="table table-sm align-middle mb-0" style="font-size:.9rem">
-        <thead class="table-dark">
-          <tr>
-            <th>Coach</th>
-            {% for sd in session_dates %}
-            <th class="text-center">{{ sd.template.name }}</th>
-            {% endfor %}
-          </tr>
-        </thead>
-        <tbody>
-          {% for c in coaches %}
-          <tr>
-            <td class="fw-semibold">{{ c.name }}</td>
-            {% for sd in session_dates %}
-            <td class="text-center">
-              <input type="checkbox" class="form-check-input" name="coach_ids_{{ sd.id }}"
-                     value="{{ c.id }}" {% if c in sd.coaches %}checked{% endif %}>
-            </td>
-            {% endfor %}
-          </tr>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0" style="font-size:.9rem">
+      <thead class="table-dark">
+        <tr>
+          <th>Coach</th>
+          {% for sd in session_dates %}
+          <th class="text-center">{{ sd.template.name }}</th>
           {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <div class="card-footer bg-transparent border-0 text-end py-2 px-3">
-      <button type="submit" class="btn btn-primary btn-sm">Save Coaches</button>
-    </div>
-  </form>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in coaches %}
+        <tr>
+          <td class="fw-semibold">
+            {{ c.name }}
+            {% if c.is_volunteer %}
+            <span class="badge bg-light text-muted border ms-1" style="font-size:.65rem">Volunteer</span>
+            {% elif c.pay_basis == 'hour' %}
+            <span class="text-muted small ms-1">${{ c.pay_rate|round|int }}/hr</span>
+            {% else %}
+            <span class="text-muted small ms-1">${{ c.pay_rate|round|int }}/session</span>
+            {% endif %}
+          </td>
+          {% for sd in session_dates %}
+          {% set ca = ca_map[sd.id].get(c.id) %}
+          <td class="text-center coach-cell" data-sd="{{ sd.id }}" data-coach="{{ c.id }}"
+              data-basis="{{ ca.basis_snapshot if ca else c.pay_basis }}">
+            <input type="checkbox" class="form-check-input coach-toggle"
+                   {% if ca %}checked{% endif %}>
+            <span class="d-inline-flex align-items-center gap-1 coach-hours-wrap ms-1"
+                  {% if not (ca and ca.basis_snapshot == 'hour') %}style="display:none !important"{% endif %}>
+              <input type="number" class="form-control form-control-sm coach-hours"
+                     style="width:4.5rem" min="0" step="0.25"
+                     value="{{ ca.hours|float if ca and ca.hours is not none else '' }}"
+                     title="Hours worked">
+              <span class="text-muted small">hrs</span>
+            </span>
+            <div class="text-muted coach-amount" style="font-size:.7rem">
+              {%- if ca and ca.net_amount %}${{ ca.net_amount|round|int }}{% endif -%}
+            </div>
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="table-light">
+          <td class="fw-semibold text-muted small">Pay total</td>
+          {% for sd in session_dates %}
+          <td class="text-center fw-bold session-pay-total" data-sd="{{ sd.id }}">
+            {%- if session_pay_totals[sd.id] %}${{ session_pay_totals[sd.id] }}{% endif -%}
+          </td>
+          {% endfor %}
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  <div class="card-footer bg-transparent border-0 py-2 px-3 text-muted" style="font-size:.75rem">
+    Ticks save instantly. Set rates on the <a href="/coaches">Coach Database</a> page.
+  </div>
   {% else %}
   <div class="card-body py-3">
     <p class="text-muted small mb-0">No coaches added yet. <a href="/coaches">Add coaches →</a></p>
   </div>
   {% endif %}
 </div>
+
+<script>
+document.querySelectorAll('.coach-cell').forEach(cell => {
+  const toggle    = cell.querySelector('.coach-toggle');
+  const hoursWrap = cell.querySelector('.coach-hours-wrap');
+  const hoursIn   = cell.querySelector('.coach-hours');
+  const amountEl  = cell.querySelector('.coach-amount');
+
+  function send(payload, revert) {
+    payload.sd_id    = cell.dataset.sd;
+    payload.coach_id = cell.dataset.coach;
+    fetch('/api/coach-attendance', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    }).then(r => r.json()).then(res => {
+      if (!res.ok) {
+        if (res.needs_confirm && confirm(res.error)) {
+          payload.force = true;
+          return send(payload, revert);
+        }
+        if (revert) revert();
+        return;
+      }
+      // Reflect server state
+      toggle.checked = res.present;
+      const hourly = cell.dataset.basis === 'hour';
+      hoursWrap.style.setProperty('display', res.present && hourly ? 'inline-flex' : 'none', 'important');
+      if (res.present && hourly && res.hours !== null && document.activeElement !== hoursIn) {
+        hoursIn.value = res.hours;
+      }
+      amountEl.textContent = (res.present && res.amount) ? '$' + res.amount : '';
+      const totalEl = document.querySelector('.session-pay-total[data-sd="' + cell.dataset.sd + '"]');
+      if (totalEl) totalEl.textContent = res.session_total ? '$' + res.session_total : '';
+    }).catch(() => { if (revert) revert(); });
+  }
+
+  toggle.addEventListener('change', () => {
+    const present = toggle.checked;
+    send({present: present}, () => { toggle.checked = !present; });
+  });
+  hoursIn.addEventListener('change', () => {
+    if (!toggle.checked) return;
+    send({present: true, hours: hoursIn.value});
+  });
+});
+</script>
 
 {% if testing_mode %}
 {# Testing helper — reset this day back to plan page #}

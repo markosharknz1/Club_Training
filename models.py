@@ -95,11 +95,45 @@ class Group(db.Model):
 
 class Coach(db.Model):
     __tablename__ = 'coaches'
-    id     = db.Column(db.Integer, primary_key=True)
-    name   = db.Column(db.String(150), nullable=False)
-    phone  = db.Column(db.String(30))
-    email  = db.Column(db.String(150))
-    active = db.Column(db.Boolean, default=True, nullable=False)
+    id        = db.Column(db.Integer, primary_key=True)
+    name      = db.Column(db.String(150), nullable=False)
+    phone     = db.Column(db.String(30))
+    email     = db.Column(db.String(150))
+    pay_rate  = db.Column(db.Numeric(8, 2), nullable=False, default=0)  # whole dollars; 0 = volunteer
+    pay_basis = db.Column(db.String(10), nullable=False, default='session')  # 'session' | 'hour'
+    notes     = db.Column(db.String(200))
+    active    = db.Column(db.Boolean, default=True, nullable=False)
+
+    @property
+    def is_volunteer(self):
+        return float(self.pay_rate or 0) == 0
+
+
+class CoachAttendance(db.Model):
+    """One row per coach per session occurrence, carrying a SNAPSHOT of the
+    coach's rate and basis at the time of marking — so a later rate change
+    never silently rewrites an already-generated month's pay report.
+    `amount` is likewise stored, not recomputed on read."""
+    __tablename__ = 'coach_attendance'
+    id                = db.Column(db.Integer, primary_key=True)
+    session_date_id   = db.Column(db.Integer, db.ForeignKey('session_dates.id'), nullable=False)
+    coach_id          = db.Column(db.Integer, db.ForeignKey('coaches.id'), nullable=False)
+    hours             = db.Column(db.Numeric(5, 2))                      # only for basis 'hour'
+    rate_snapshot     = db.Column(db.Numeric(8, 2), nullable=False, default=0)
+    basis_snapshot    = db.Column(db.String(10), nullable=False, default='session')
+    amount            = db.Column(db.Numeric(8, 2), nullable=False, default=0)
+    adjustment        = db.Column(db.Numeric(8, 2), nullable=False, default=0)  # manual +/- (travel, cover…)
+    adjustment_reason = db.Column(db.String(200))
+    marked_at         = db.Column(db.DateTime, default=datetime.utcnow)
+
+    coach        = db.relationship('Coach')
+    session_date = db.relationship('SessionDate', backref='coach_attendance')
+
+    __table_args__ = (db.UniqueConstraint('session_date_id', 'coach_id'),)
+
+    @property
+    def net_amount(self):
+        return float(self.amount or 0) + float(self.adjustment or 0)
 
 
 sibling_links = db.Table('sibling_links',

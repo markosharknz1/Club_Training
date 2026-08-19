@@ -15,6 +15,7 @@ from flask import (Flask, jsonify, flash, redirect, render_template,
 import config
 from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     sibling_links, SessionDate, Attendance, Voucher,
+                    CoachAttendance,
                     PAYMENT_TYPES, AMOUNT_TYPES, DAY_NAMES, PAYMENT_COLORS,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
@@ -122,6 +123,29 @@ def create_app():
             db.session.execute(db.text("ALTER TABLE players ADD COLUMN membership_type VARCHAR(30)"))
             db.session.execute(db.text("ALTER TABLE players ADD COLUMN membership_status VARCHAR(30)"))
             db.session.commit()
+        coach_cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(coaches)")).fetchall()]
+        if 'pay_rate' not in coach_cols:
+            db.session.execute(db.text("ALTER TABLE coaches ADD COLUMN pay_rate NUMERIC(8,2) NOT NULL DEFAULT 0"))
+            db.session.execute(db.text("ALTER TABLE coaches ADD COLUMN pay_basis VARCHAR(10) NOT NULL DEFAULT 'session'"))
+            db.session.execute(db.text("ALTER TABLE coaches ADD COLUMN notes VARCHAR(200)"))
+            db.session.commit()
+        # One-time: carry historic coach markings (old session_date_coaches m2m)
+        # into CoachAttendance, snapshotting each coach's CURRENT rate.
+        if CoachAttendance.query.count() == 0:
+            old_rows = db.session.execute(db.text(
+                "SELECT session_date_id, coach_id FROM session_date_coaches")).fetchall()
+            if old_rows:
+                for sd_id, c_id in old_rows:
+                    c  = db.session.get(Coach, c_id)
+                    sd = db.session.get(SessionDate, sd_id)
+                    if not c or not sd:
+                        continue
+                    amount, hours = _coach_pay_amount(c, sd.template)
+                    db.session.add(CoachAttendance(
+                        session_date_id=sd_id, coach_id=c_id, hours=hours,
+                        rate_snapshot=c.pay_rate, basis_snapshot=c.pay_basis,
+                        amount=amount))
+                db.session.commit()
         session_tmpl_cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(session_templates)")).fetchall()]
         if 'category' not in session_tmpl_cols:
             db.session.execute(db.text("ALTER TABLE session_templates ADD COLUMN category VARCHAR(10) NOT NULL DEFAULT 'Mixed'"))
@@ -204,28 +228,79 @@ def create_app():
         is_future      = d > date.today()
         coaches        = Coach.query.filter_by(active=True).order_by(Coach.name).all()
 
+        # Coach attendance map: ca_map[sd.id][coach.id] = CoachAttendance row
+        sd_ids = [sd.id for sd in session_dates]
+        ca_map = {sid: {} for sid in sd_ids}
+        if sd_ids:
+            for ca in CoachAttendance.query.filter(
+                    CoachAttendance.session_date_id.in_(sd_ids)).all():
+                ca_map[ca.session_date_id][ca.coach_id] = ca
+        session_pay_totals = {
+            sid: round(sum(ca.net_amount for ca in cas.values()))
+            for sid, cas in ca_map.items()}
+
         return render_template('day/view.html',
                                d=d, session_dates=session_dates,
                                all_templates=all_templates,
                                used_ids=used_ids,
                                prev_day=prev_day, next_day=next_day,
                                is_today=is_today, is_future=is_future,
-                               coaches=coaches,
+                               coaches=coaches, ca_map=ca_map,
+                               session_pay_totals=session_pay_totals,
+                               month_finalised=_coach_month_finalised(d.year, d.month),
                                PAYMENT_COLORS=PAYMENT_COLORS)
 
-    @app.route('/day/<date_iso>/coaches', methods=['POST'])
-    def day_coaches(date_iso):
-        try:
-            d = date.fromisoformat(date_iso)
-        except ValueError:
-            return redirect(url_for('home'))
-        session_dates = SessionDate.query.filter_by(date=d).all()
-        for sd in session_dates:
-            ids = request.form.getlist(f'coach_ids_{sd.id}')
-            sd.coaches = [Coach.query.get(int(c)) for c in ids if c]
+    @app.route('/api/coach-attendance', methods=['POST'])
+    def api_coach_attendance():
+        """Instant coach mark/unmark (and hours edit) for one session occurrence.
+        Body: {sd_id, coach_id, present, hours?, force?}"""
+        data     = request.get_json()
+        sd       = SessionDate.query.get_or_404(int(data['sd_id']))
+        coach    = Coach.query.get_or_404(int(data['coach_id']))
+        present  = bool(data.get('present'))
+
+        if (_coach_month_finalised(sd.date.year, sd.date.month)
+                and not data.get('force')):
+            return jsonify({'ok': False, 'needs_confirm': True, 'error':
+                f'{sd.date.strftime("%B %Y")} coach payments are finalised. '
+                'Change anyway?'})
+
+        ca = CoachAttendance.query.filter_by(
+            session_date_id=sd.id, coach_id=coach.id).first()
+        if not present:
+            if ca:
+                db.session.delete(ca)
+        else:
+            hours = data.get('hours')
+            if hours is not None:
+                try:
+                    hours = max(0.0, float(hours))
+                except (TypeError, ValueError):
+                    hours = None
+            if ca:
+                # Hours edit — keep the ORIGINAL snapshot, recompute amount
+                if ca.basis_snapshot == 'hour' and hours is not None:
+                    ca.hours  = hours
+                    ca.amount = round(float(ca.rate_snapshot or 0) * hours, 2)
+            else:
+                amount, h = _coach_pay_amount(coach, sd.template, hours)
+                ca = CoachAttendance(
+                    session_date_id=sd.id, coach_id=coach.id, hours=h,
+                    rate_snapshot=coach.pay_rate, basis_snapshot=coach.pay_basis,
+                    amount=amount)
+                db.session.add(ca)
         db.session.commit()
-        flash('Coaches updated.', 'success')
-        return redirect(url_for('day_view', date_iso=date_iso))
+
+        total = round(sum(
+            row.net_amount for row in
+            CoachAttendance.query.filter_by(session_date_id=sd.id).all()))
+        return jsonify({
+            'ok': True,
+            'present': present and ca is not None,
+            'hours': float(ca.hours) if (present and ca and ca.hours is not None) else None,
+            'amount': round(ca.net_amount) if (present and ca) else 0,
+            'session_total': total,
+        })
 
     @app.route('/day/<date_iso>/plan')
     def day_plan(date_iso):
@@ -302,8 +377,8 @@ def create_app():
         # Coach → list of session names they coached today
         coach_map = OrderedDict()
         for sd in session_dates:
-            for c in sd.coaches:
-                coach_map.setdefault(c.name, []).append(sd.template.name)
+            for ca in sorted(sd.coach_attendance, key=lambda x: x.coach.name):
+                coach_map.setdefault(ca.coach.name, []).append(sd.template.name)
 
         day_totals = {
             'kids':  sum(sd.total_attending for sd in session_dates),
@@ -1016,7 +1091,8 @@ def create_app():
 
         attendance_map = {a.player_id: a for a in sd.attendance}
         coaches        = Coach.query.filter_by(active=True).order_by(Coach.name).all()
-        coach_ids      = {c.id for c in sd.coaches}
+        coach_ids      = {ca.coach_id for ca in
+                          CoachAttendance.query.filter_by(session_date_id=sd.id).all()}
 
         return render_template('register/run.html',
                                sd=sd, tmpl=tmpl,
@@ -1104,7 +1180,25 @@ def create_app():
     @app.route('/register/<int:sd_id>/coaches', methods=['POST'])
     def register_coaches(sd_id):
         sd = SessionDate.query.get_or_404(sd_id)
-        sd.coaches = [Coach.query.get(int(c)) for c in request.form.getlist('coach_ids') if c]
+        if _coach_month_finalised(sd.date.year, sd.date.month):
+            flash(f'{sd.date.strftime("%B %Y")} coach payments are finalised — '
+                  'edit coaches from the day page instead.', 'warning')
+            return redirect(url_for('register_run', sd_id=sd_id))
+        wanted = {int(c) for c in request.form.getlist('coach_ids') if c}
+        existing = {ca.coach_id: ca for ca in
+                    CoachAttendance.query.filter_by(session_date_id=sd.id).all()}
+        for cid, ca in existing.items():
+            if cid not in wanted:
+                db.session.delete(ca)
+        for cid in wanted - set(existing):
+            coach = Coach.query.get(cid)
+            if not coach:
+                continue
+            amount, hours = _coach_pay_amount(coach, sd.template)
+            db.session.add(CoachAttendance(
+                session_date_id=sd.id, coach_id=cid, hours=hours,
+                rate_snapshot=coach.pay_rate, basis_snapshot=coach.pay_basis,
+                amount=amount))
         db.session.commit()
         return redirect(url_for('register_run', sd_id=sd_id))
 
@@ -1500,21 +1594,43 @@ def create_app():
     def coaches():
         if request.method == 'POST':
             action = request.form.get('action')
+
+            def _pay_fields():
+                try:
+                    rate = max(0, int(request.form.get('pay_rate') or 0))
+                except ValueError:
+                    rate = 0
+                basis = request.form.get('pay_basis', 'session')
+                if basis not in ('session', 'hour'):
+                    basis = 'session'
+                return rate, basis, request.form.get('notes', '').strip()
+
             if action == 'add':
+                rate, basis, notes = _pay_fields()
                 db.session.add(Coach(
                     name=request.form['name'].strip(),
                     phone=request.form.get('phone', '').strip(),
                     email=request.form.get('email', '').strip(),
+                    pay_rate=rate, pay_basis=basis, notes=notes,
                 ))
                 db.session.commit()
                 flash('Coach added.', 'success')
             elif action == 'edit':
                 c = Coach.query.get_or_404(int(request.form['coach_id']))
+                rate, basis, notes = _pay_fields()
+                rate_changed = (int(float(c.pay_rate or 0)) != rate
+                                or c.pay_basis != basis)
                 c.name  = request.form['name'].strip()
                 c.phone = request.form.get('phone', '').strip()
                 c.email = request.form.get('email', '').strip()
+                c.pay_rate, c.pay_basis, c.notes = rate, basis, notes
                 db.session.commit()
-                flash('Coach updated.', 'success')
+                if rate_changed:
+                    flash('Coach updated. The new rate applies to future '
+                          'sessions only — already-marked sessions keep the '
+                          'rate they were marked at.', 'warning')
+                else:
+                    flash('Coach updated.', 'success')
             elif action == 'deactivate':
                 c = Coach.query.get_or_404(int(request.form['coach_id']))
                 c.active = False
@@ -1527,17 +1643,161 @@ def create_app():
         # Coaching stats: sessions coached ever/this year, and last coached date
         coach_stats = {}
         this_year = date.today().year
-        for sd in SessionDate.query.all():
-            for c in sd.coaches:
-                st = coach_stats.setdefault(c.id, {'total': 0, 'this_year': 0, 'last': None})
-                st['total'] += 1
-                if sd.date.year == this_year:
-                    st['this_year'] += 1
-                if st['last'] is None or sd.date > st['last']:
-                    st['last'] = sd.date
+        for ca in CoachAttendance.query.join(SessionDate).all():
+            sd = ca.session_date
+            st = coach_stats.setdefault(ca.coach_id,
+                                        {'total': 0, 'this_year': 0, 'last': None})
+            st['total'] += 1
+            if sd.date.year == this_year:
+                st['this_year'] += 1
+            if st['last'] is None or sd.date > st['last']:
+                st['last'] = sd.date
 
         return render_template('coaches.html', coaches=all_coaches,
                                coach_stats=coach_stats, this_year=this_year)
+
+    # ── Coach payments (end of month) ─────────────────────────────────
+
+    def _coach_month_data(year, month):
+        """Per-coach pay summary + detail rows for one calendar month."""
+        start = date(year, month, 1)
+        end   = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+        rows = (CoachAttendance.query.join(SessionDate)
+                .filter(SessionDate.date >= start, SessionDate.date < end)
+                .order_by(SessionDate.date).all())
+        by_coach = OrderedDict()
+        for ca in sorted(rows, key=lambda x: (x.coach.name, x.session_date.date)):
+            e = by_coach.setdefault(ca.coach_id, {
+                'coach': ca.coach, 'sessions': 0, 'hours': 0.0,
+                'gross': 0.0, 'adjust': 0.0, 'net': 0.0, 'rows': []})
+            e['sessions'] += 1
+            if ca.basis_snapshot == 'hour' and ca.hours is not None:
+                e['hours'] += float(ca.hours)
+            e['gross']  += float(ca.amount or 0)
+            e['adjust'] += float(ca.adjustment or 0)
+            e['net']    += ca.net_amount
+            e['rows'].append(ca)
+        payable    = [e for e in by_coach.values() if not e['coach'].is_volunteer]
+        volunteers = [e for e in by_coach.values() if e['coach'].is_volunteer]
+        totals = {
+            'sessions': sum(e['sessions'] for e in payable),
+            'gross':    sum(e['gross'] for e in payable),
+            'adjust':   sum(e['adjust'] for e in payable),
+            'net':      sum(e['net'] for e in payable),
+        }
+        return payable, volunteers, totals
+
+    @app.route('/coach-payments')
+    def coach_payments():
+        month_str = request.args.get('month', '')
+        try:
+            year, month = (int(x) for x in month_str.split('-'))
+            date(year, month, 1)
+        except (ValueError, TypeError):
+            today = date.today()
+            year, month = today.year, today.month
+        payable, volunteers, totals = _coach_month_data(year, month)
+        prev_y, prev_m = (year - 1, 12) if month == 1 else (year, month - 1)
+        next_y, next_m = (year + 1, 1) if month == 12 else (year, month + 1)
+        return render_template('coach_payments.html',
+                               year=year, month=month,
+                               month_label=date(year, month, 1).strftime('%B %Y'),
+                               month_key=f'{year:04d}-{month:02d}',
+                               prev_month=f'{prev_y:04d}-{prev_m:02d}',
+                               next_month=f'{next_y:04d}-{next_m:02d}',
+                               payable=payable, volunteers=volunteers,
+                               totals=totals,
+                               finalised=_coach_month_finalised(year, month))
+
+    @app.route('/coach-payments/finalise', methods=['POST'])
+    def coach_payments_finalise():
+        month_key = request.form.get('month', '')
+        try:
+            year, month = (int(x) for x in month_key.split('-'))
+            date(year, month, 1)
+        except (ValueError, TypeError):
+            return redirect(url_for('coach_payments'))
+        finalise = request.form.get('finalise') == '1'
+        Setting.set(f'coach_month_final_{year:04d}-{month:02d}',
+                    '1' if finalise else '0')
+        if finalise:
+            flash(f'{date(year, month, 1).strftime("%B %Y")} coach payments '
+                  'finalised. Session changes for this month now ask for '
+                  'confirmation first.', 'success')
+        else:
+            flash(f'{date(year, month, 1).strftime("%B %Y")} re-opened for '
+                  'changes.', 'warning')
+        return redirect(url_for('coach_payments', month=month_key))
+
+    @app.route('/api/coach-attendance/adjust', methods=['POST'])
+    def api_coach_adjust():
+        """Set a one-off adjustment (+/- whole dollars) on one attendance row."""
+        data = request.get_json()
+        ca = CoachAttendance.query.get_or_404(int(data['ca_id']))
+        d  = ca.session_date.date
+        if _coach_month_finalised(d.year, d.month) and not data.get('force'):
+            return jsonify({'ok': False, 'needs_confirm': True, 'error':
+                f'{d.strftime("%B %Y")} coach payments are finalised. '
+                'Change anyway?'})
+        try:
+            ca.adjustment = int(float(data.get('adjustment') or 0))
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'error': 'Adjustment must be a whole-dollar number.'})
+        ca.adjustment_reason = (data.get('reason') or '').strip()[:200]
+        db.session.commit()
+        return jsonify({'ok': True, 'net': round(ca.net_amount)})
+
+    @app.route('/coach-payments/export')
+    def coach_payments_export():
+        import csv as csv_mod
+        import io
+        from flask import send_file
+        month_key = request.args.get('month', '')
+        try:
+            year, month = (int(x) for x in month_key.split('-'))
+            date(year, month, 1)
+        except (ValueError, TypeError):
+            return redirect(url_for('coach_payments'))
+        kind = request.args.get('kind', 'summary')
+        payable, volunteers, totals = _coach_month_data(year, month)
+
+        buf = io.StringIO()
+        w = csv_mod.writer(buf)
+        if kind == 'detail':
+            w.writerow(['Coach', 'Date', 'Session', 'Basis', 'Hours', 'Rate',
+                        'Amount', 'Adjustment', 'Adjustment Reason', 'Net'])
+            for e in payable + volunteers:
+                for ca in e['rows']:
+                    w.writerow([
+                        e['coach'].name,
+                        ca.session_date.date.isoformat(),
+                        ca.session_date.template.name,
+                        ca.basis_snapshot,
+                        float(ca.hours) if ca.hours is not None else '',
+                        round(float(ca.rate_snapshot or 0)),
+                        round(float(ca.amount or 0)),
+                        round(float(ca.adjustment or 0)),
+                        ca.adjustment_reason or '',
+                        round(ca.net_amount)])
+            fname = f'coach-payments-detail-{year:04d}-{month:02d}.csv'
+        else:
+            w.writerow(['Coach', 'Sessions', 'Hours', 'Gross', 'Adjustments',
+                        'Net Pay', 'Status'])
+            for e in payable:
+                w.writerow([e['coach'].name, e['sessions'],
+                            e['hours'] or '', round(e['gross']),
+                            round(e['adjust']), round(e['net']), 'Payable'])
+            for e in volunteers:
+                w.writerow([e['coach'].name, e['sessions'], '', 0, 0, 0,
+                            'Volunteer'])
+            w.writerow([])
+            w.writerow(['TOTAL PAYABLE', totals['sessions'], '',
+                        round(totals['gross']), round(totals['adjust']),
+                        round(totals['net']), ''])
+            fname = f'coach-payments-{year:04d}-{month:02d}.csv'
+        out = io.BytesIO(buf.getvalue().encode('utf-8-sig'))
+        return send_file(out, as_attachment=True, download_name=fname,
+                         mimetype='text/csv')
 
     # ── Reports ──────────────────────────────────────────────────────
 
@@ -1805,8 +2065,14 @@ def create_app():
         for cell in ws4[1]:
             cell.font = hdr_font; cell.fill = hdr_fill; cell.alignment = Alignment(wrap_text=True, vertical='top')
         ws4.row_dimensions[1].height = 45
+        sd_ids_month = [sd.id for sd in sds]
+        coached_map = defaultdict(set)   # coach_id -> {sd_id}
+        if sd_ids_month:
+            for ca in CoachAttendance.query.filter(
+                    CoachAttendance.session_date_id.in_(sd_ids_month)).all():
+                coached_map[ca.coach_id].add(ca.session_date_id)
         for i, coach in enumerate(all_coaches):
-            coached = {sd.id for sd in sds if coach in sd.coaches}
+            coached = coached_map.get(coach.id, set())
             ws4.append([coach.name]
                        + ['Yes' if sd.id in coached else '' for sd in sds]
                        + [len(coached)])
@@ -2226,6 +2492,32 @@ def _reports_data(months, session_filter):
         'total_sessions':  len(dates),
         'total_att':       sum(sd.total_attending for sd in dates),
     }
+
+
+def _session_duration_hours(template):
+    """Scheduled length of a session in hours, from its HH:MM start/end."""
+    try:
+        sh, sm = (int(x) for x in template.start_time.split(':'))
+        eh, em = (int(x) for x in template.end_time.split(':'))
+        mins = (eh * 60 + em) - (sh * 60 + sm)
+        return round(max(mins, 0) / 60, 2)
+    except (ValueError, AttributeError):
+        return 0.0
+
+
+def _coach_pay_amount(coach, template, hours=None):
+    """(amount, hours) for a coach working one occurrence of `template`.
+    Session basis: flat rate, hours None. Hour basis: rate × hours, defaulting
+    hours to the session's scheduled duration."""
+    rate = float(coach.pay_rate or 0)
+    if coach.pay_basis == 'hour':
+        h = float(hours) if hours is not None else _session_duration_hours(template)
+        return round(rate * h, 2), h
+    return round(rate, 2), None
+
+
+def _coach_month_finalised(year, month):
+    return Setting.get(f'coach_month_final_{year:04d}-{month:02d}', '0') == '1'
 
 
 def _voucher_limit_error(player_id, issued_date):

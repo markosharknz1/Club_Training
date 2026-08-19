@@ -58,8 +58,17 @@ own machine and demo to other club members (e.g. "Carol").
 - `Voucher` — a Sports Voucher registered against a player: `amount` (default $100),
   `sessions_total` (default 10), `date_issued`, `notes`. `sessions_used` / `sessions_remaining`
   are computed properties from linked `Attendance.voucher_id` rows.
-- `Coach` — linked to `SessionDate` via `session_date_coaches` m2m (a coach can work multiple
-  sessions on the same day).
+- `Coach` — name/phone/email plus pay fields: `pay_rate` (whole dollars; 0 = volunteer, see
+  `is_volunteer`), `pay_basis` (`'session'` | `'hour'`), `notes`.
+- `CoachAttendance` — one row per coach per `SessionDate` (unique constraint), the source of
+  truth for who coached what and what they're owed. Carries a **snapshot** of the coach's
+  rate/basis at marking time (`rate_snapshot`/`basis_snapshot`) plus computed `amount`, optional
+  `hours` (hourly coaches; defaults to the session's scheduled duration), `adjustment` +
+  `adjustment_reason`, and `marked_at`. `net_amount` = amount + adjustment. Historic pay is
+  NEVER recomputed from the coach's current rate. The old `session_date_coaches` m2m still
+  exists (add-only convention) but is **dormant** — a one-time idempotent migration in
+  `create_app()` copied its rows into `CoachAttendance` (snapshotting each coach's
+  then-current rate) and nothing reads or writes it any more.
 
 ## Feature map (chronological, roughly)
 
@@ -423,6 +432,41 @@ own machine and demo to other club members (e.g. "Carol").
     "player left the club" cases to Edit → inactive instead. Both have strong JS confirms.
     Tested end-to-end against a temp copy of the DB (the post-incident standard for anything
     destructive).
+
+30. **Coach attendance & end-of-month pay** (workstream 1 of the user's pasted spec; user's
+    answers: coach and player records fully separate; flat rate per session — a coach working
+    two sessions on the same day is paid for both; coach pay is completely separate from money
+    the club takes; volunteers = rate 0, shown but never payable; month extract is "just a list
+    for whoever pays", plain CSVs).
+    - **Coach Database** (`/coaches`): add/edit now includes pay rate ($, whole dollars),
+      paid-per (session/hour) and notes. Editing the rate/basis flashes a warning that the
+      change affects **future sessions only**. Cards show the rate or a "Volunteer (unpaid)"
+      badge and link to Coach Payments.
+    - **Coaches Present matrix** (day view): now instant AJAX (`POST /api/coach-attendance`) —
+      each tick immediately creates a `CoachAttendance` row with rate/basis snapshots; untick
+      deletes it. Hourly coaches get an hours input (prefilled with the session's scheduled
+      duration, editable, amount recomputes against the **snapshot** rate) and each session
+      column shows a live "Pay total" footer. The register run page's coach checkboxes
+      (`POST /register/<id>/coaches`) write `CoachAttendance` the same way.
+    - **Coach Payments** (`/coach-payments?month=YYYY-MM`, linked from Coach Database):
+      per-coach month summary (sessions, hours, gross, adjustments, net) with collapsible
+      per-session detail; adjustments (whole dollars, ± with reason) editable inline via
+      `POST /api/coach-attendance/adjust`. Volunteers listed but excluded from the payable
+      total. Two CSV exports (stdlib csv, UTF-8-sig): `coach-payments-YYYY-MM.csv` (summary
+      + TOTAL PAYABLE row) and `coach-payments-detail-YYYY-MM.csv` (every row incl.
+      adjustment reasons).
+    - **Finalise month**: sets Setting `coach_month_final_YYYY-MM`. Once finalised, coach
+      ticks/hours/adjustments for that month get a JS confirm ("finalised — change anyway?")
+      which resends with `force: true`; re-open any time from the same page. The register-page
+      coach form just refuses with a flash when the month is finalised (no JS there).
+    - Tested end-to-end on a temp DB copy (32 checks, all green): m2m migration + idempotency,
+      same-day double pay, hourly maths incl. duration default, snapshot survival across rate
+      changes, volunteer exclusion, adjustments, finalise/force/re-open, CSV parse + sum
+      reconciliation, and regressions on day view/summary, register run, coach DB and the
+      monthly Excel export (whose Coaches sheet now reads `CoachAttendance`).
+    Workstream 2 of that spec (PII protection: admin password gate, audit log, recovery codes,
+    envelope encryption) is **not built yet** — see spec notes in chat history; it needs a
+    Flask/SQLAlchemy redesign of the doc's sql.js design before building.
 
 ## Known open items (not yet built — need user input before building)
 

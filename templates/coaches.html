@@ -2,11 +2,14 @@
 {% block title %}Coach Database — {{ club_name }}{% endblock %}
 {% block content %}
 
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <h5 class="mb-0 fw-bold">Coach Database</h5>
-  <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addCoachModal">
-    + Add Coach
-  </button>
+  <div class="d-flex gap-2">
+    <a href="/coach-payments" class="btn btn-outline-primary btn-sm">Coach Payments →</a>
+    <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addCoachModal">
+      + Add Coach
+    </button>
+  </div>
 </div>
 
 {% if coaches %}
@@ -23,6 +26,18 @@
             {% endif %}
             {% if c.email %}
             <div class="small text-muted">{{ c.email }}</div>
+            {% endif %}
+            <div class="small mt-1">
+              {% if c.is_volunteer %}
+              <span class="badge bg-light text-muted border">Volunteer (unpaid)</span>
+              {% else %}
+              <span class="badge bg-primary-subtle text-primary border border-primary-subtle">
+                ${{ c.pay_rate|round|int }} per {{ 'hour' if c.pay_basis == 'hour' else 'session' }}
+              </span>
+              {% endif %}
+            </div>
+            {% if c.notes %}
+            <div class="small text-muted fst-italic mt-1">{{ c.notes }}</div>
             {% endif %}
             {% set st = coach_stats.get(c.id) %}
             <div class="small text-muted mt-2">
@@ -74,6 +89,29 @@
               <label class="form-label fw-semibold">Email</label>
               <input type="email" name="email" class="form-control" value="{{ c.email or '' }}">
             </div>
+            <div class="row g-2 mb-2">
+              <div class="col-6">
+                <label class="form-label fw-semibold">Pay rate ($)</label>
+                <input type="number" name="pay_rate" class="form-control" min="0" step="1"
+                       value="{{ c.pay_rate|round|int }}">
+              </div>
+              <div class="col-6">
+                <label class="form-label fw-semibold">Paid per</label>
+                <select name="pay_basis" class="form-select">
+                  <option value="session" {% if c.pay_basis != 'hour' %}selected{% endif %}>Session</option>
+                  <option value="hour" {% if c.pay_basis == 'hour' %}selected{% endif %}>Hour</option>
+                </select>
+              </div>
+            </div>
+            <div class="text-muted small mb-3">
+              Rate 0 = volunteer (shown on sessions, never payable). Changing the rate
+              only affects sessions marked from now on.
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Notes</label>
+              <input type="text" name="notes" class="form-control" maxlength="200"
+                     value="{{ c.notes or '' }}" placeholder="e.g. head coach, invoices monthly">
+            </div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -111,6 +149,25 @@
           <div class="mb-3">
             <label class="form-label fw-semibold">Email</label>
             <input type="email" name="email" class="form-control">
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label fw-semibold">Pay rate ($)</label>
+              <input type="number" name="pay_rate" class="form-control" min="0" step="1" value="0">
+            </div>
+            <div class="col-6">
+              <label class="form-label fw-semibold">Paid per</label>
+              <select name="pay_basis" class="form-select">
+                <option value="session" selected>Session</option>
+                <option value="hour">Hour</option>
+              </select>
+            </div>
+          </div>
+          <div class="text-muted small mb-2">Rate 0 = volunteer (shown on sessions, never payable).</div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Notes</label>
+            <input type="text" name="notes" class="form-control" maxlength="200"
+                   placeholder="e.g. head coach, invoices monthly">
           </div>
         </div>
         <div class="modal-footer">

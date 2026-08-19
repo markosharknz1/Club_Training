@@ -1,0 +1,208 @@
+{% extends 'base.html' %}
+{% block title %}Coach Payments — {{ club_name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div class="d-flex align-items-center gap-2">
+    <h5 class="mb-0 fw-bold">Coach Payments</h5>
+    {% if finalised %}
+    <span class="badge bg-warning text-dark">Finalised</span>
+    {% endif %}
+  </div>
+  <a href="/coaches" class="btn btn-outline-secondary btn-sm">← Coach Database</a>
+</div>
+
+{# Month picker #}
+<div class="d-flex align-items-center gap-2 mb-4">
+  <a href="/coach-payments?month={{ prev_month }}" class="btn btn-outline-secondary btn-sm">‹</a>
+  <span class="fw-semibold">{{ month_label }}</span>
+  <a href="/coach-payments?month={{ next_month }}" class="btn btn-outline-secondary btn-sm">›</a>
+</div>
+
+{% if payable or volunteers %}
+
+{# Summary #}
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-header fw-bold d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span>Pay Summary — {{ month_label }}</span>
+    <div class="d-flex gap-2">
+      <a href="/coach-payments/export?month={{ month_key }}&kind=summary"
+         class="btn btn-outline-success btn-sm">⬇ Summary CSV</a>
+      <a href="/coach-payments/export?month={{ month_key }}&kind=detail"
+         class="btn btn-outline-success btn-sm">⬇ Detail CSV</a>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0" style="font-size:.9rem">
+      <thead class="table-dark">
+        <tr>
+          <th>Coach</th>
+          <th class="text-center">Sessions</th>
+          <th class="text-center">Hours</th>
+          <th class="text-end">Gross</th>
+          <th class="text-end">Adjustments</th>
+          <th class="text-end">Net Pay</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in payable %}
+        <tr>
+          <td class="fw-semibold">{{ e.coach.name }}</td>
+          <td class="text-center">{{ e.sessions }}</td>
+          <td class="text-center">{{ e.hours if e.hours else '—' }}</td>
+          <td class="text-end">${{ e.gross|round|int }}</td>
+          <td class="text-end {{ 'text-danger' if e.adjust < 0 else '' }}">
+            {%- if e.adjust %}{{ '−' if e.adjust < 0 }}${{ e.adjust|abs|round|int }}{% else %}—{% endif -%}
+          </td>
+          <td class="text-end fw-bold coach-net" data-coach="{{ e.coach.id }}">${{ e.net|round|int }}</td>
+          <td class="text-end">
+            <button class="btn btn-outline-secondary btn-sm py-0 px-2" data-bs-toggle="collapse"
+                    data-bs-target="#detail{{ e.coach.id }}">Detail</button>
+          </td>
+        </tr>
+        {% endfor %}
+        {% for e in volunteers %}
+        <tr class="text-muted">
+          <td>{{ e.coach.name }}
+            <span class="badge bg-light text-muted border ms-1" style="font-size:.65rem">Volunteer</span>
+          </td>
+          <td class="text-center">{{ e.sessions }}</td>
+          <td class="text-center">—</td>
+          <td class="text-end">—</td>
+          <td class="text-end">—</td>
+          <td class="text-end">$0</td>
+          <td></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="table-light fw-bold">
+          <td>Total payable</td>
+          <td class="text-center">{{ totals.sessions }}</td>
+          <td></td>
+          <td class="text-end">${{ totals.gross|round|int }}</td>
+          <td class="text-end">
+            {%- if totals.adjust %}{{ '−' if totals.adjust < 0 }}${{ totals.adjust|abs|round|int }}{% else %}—{% endif -%}
+          </td>
+          <td class="text-end" id="grandNet">${{ totals.net|round|int }}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+
+{# Per-coach detail (collapsible) #}
+{% for e in payable %}
+<div class="collapse mb-4" id="detail{{ e.coach.id }}">
+  <div class="card shadow-sm border-0">
+    <div class="card-header fw-semibold">{{ e.coach.name }} — session detail</div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0" style="font-size:.85rem">
+        <thead class="table-light">
+          <tr>
+            <th>Date</th><th>Session</th><th class="text-center">Rate</th>
+            <th class="text-center">Hours</th><th class="text-end">Amount</th>
+            <th class="text-end" style="width:8rem">Adjustment</th>
+            <th style="width:16rem">Reason</th>
+            <th class="text-end">Net</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ca in e.rows %}
+          <tr class="adjust-row" data-ca="{{ ca.id }}">
+            <td>{{ ca.session_date.date.strftime('%d %b') }}</td>
+            <td>{{ ca.session_date.template.name }}</td>
+            <td class="text-center">${{ ca.rate_snapshot|round|int }}{{ '/hr' if ca.basis_snapshot == 'hour' }}</td>
+            <td class="text-center">{{ ca.hours|float if ca.hours is not none else '—' }}</td>
+            <td class="text-end">${{ ca.amount|round|int }}</td>
+            <td class="text-end">
+              <input type="number" step="1" class="form-control form-control-sm text-end adjust-amount"
+                     style="min-width:5rem" value="{{ ca.adjustment|round|int if ca.adjustment else '' }}"
+                     placeholder="0">
+            </td>
+            <td>
+              <input type="text" class="form-control form-control-sm adjust-reason" maxlength="200"
+                     value="{{ ca.adjustment_reason or '' }}" placeholder="reason (optional)">
+            </td>
+            <td class="text-end fw-semibold row-net">${{ ca.net_amount|round|int }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer bg-transparent border-0 text-muted py-2" style="font-size:.75rem">
+      Adjustments save when you click away. Use negative numbers for deductions.
+      Totals above update on next page load.
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+{# Finalise #}
+<div class="card shadow-sm border-0 mb-4" style="max-width:560px">
+  <div class="card-body">
+    {% if not finalised %}
+    <h6 class="fw-bold mb-2">Finalise {{ month_label }}</h6>
+    <p class="text-muted small mb-3">
+      Marks this month's coach payments as done. Coach ticks and adjustments for
+      {{ month_label }} will ask for confirmation before changing. You can re-open at any time.
+    </p>
+    <form method="post" action="/coach-payments/finalise"
+          onsubmit="return confirm('Finalise coach payments for {{ month_label }}?')">
+      <input type="hidden" name="month" value="{{ month_key }}">
+      <input type="hidden" name="finalise" value="1">
+      <button type="submit" class="btn btn-primary btn-sm">Finalise Month</button>
+    </form>
+    {% else %}
+    <h6 class="fw-bold mb-2">{{ month_label }} is finalised</h6>
+    <p class="text-muted small mb-3">Changes to this month now ask for confirmation first.</p>
+    <form method="post" action="/coach-payments/finalise">
+      <input type="hidden" name="month" value="{{ month_key }}">
+      <input type="hidden" name="finalise" value="0">
+      <button type="submit" class="btn btn-outline-warning btn-sm">Re-open Month</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% else %}
+<div class="alert alert-info">
+  No coaches were marked on any session in {{ month_label }}.
+  Coaches are ticked on each day's page under <strong>Coaches Present</strong>.
+</div>
+{% endif %}
+
+<script>
+document.querySelectorAll('.adjust-row').forEach(row => {
+  const amountIn = row.querySelector('.adjust-amount');
+  const reasonIn = row.querySelector('.adjust-reason');
+  const netEl    = row.querySelector('.row-net');
+
+  function save(force) {
+    const payload = {
+      ca_id: row.dataset.ca,
+      adjustment: amountIn.value || 0,
+      reason: reasonIn.value,
+    };
+    if (force) payload.force = true;
+    fetch('/api/coach-attendance/adjust', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    }).then(r => r.json()).then(res => {
+      if (!res.ok) {
+        if (res.needs_confirm && confirm(res.error)) return save(true);
+        return;
+      }
+      netEl.textContent = '$' + res.net;
+      row.classList.add('table-success');
+      setTimeout(() => row.classList.remove('table-success'), 600);
+    });
+  }
+  amountIn.addEventListener('change', () => save(false));
+  reasonIn.addEventListener('change', () => save(false));
+});
+</script>
+
+{% endblock %}
