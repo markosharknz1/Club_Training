@@ -21,7 +21,7 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
 
-APP_VERSION = '1.4.0'
+APP_VERSION = '1.5.0'
 
 # ─── Branding ───────────────────────────────────────────────────────
 # Bundled club icons (static/icons/sports/<key>.svg — see LICENSE.md there).
@@ -144,6 +144,9 @@ def create_app():
         cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(attendance)")).fetchall()]
         if 'voucher_id' not in cols:
             db.session.execute(db.text("ALTER TABLE attendance ADD COLUMN voucher_id INTEGER REFERENCES vouchers(id)"))
+            db.session.commit()
+        if 'new_member' not in cols:
+            db.session.execute(db.text("ALTER TABLE attendance ADD COLUMN new_member BOOLEAN NOT NULL DEFAULT 0"))
             db.session.commit()
         player_cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(players)")).fetchall()]
         if 'medicare_number' not in player_cols:
@@ -469,10 +472,20 @@ def create_app():
             for ca in sorted(sd.coach_attendance, key=lambda x: x.coach.name):
                 coach_map.setdefault(ca.coach.name, []).append(sd.template.name)
 
+        # New players ticked today (name → sessions they were new at)
+        new_map = OrderedDict()
+        for sd in session_dates:
+            for a in sd.attendance:
+                if a.new_member:
+                    p = db.session.get(Player, a.player_id)
+                    if p:
+                        new_map.setdefault(p.name, []).append(sd.template.name)
+
         day_totals = {
             'kids':  sum(sd.total_attending for sd in session_dates),
             'cash':  sum(sd.total_cash for sd in session_dates),
             'card':  sum(sd.total_card for sd in session_dates),
+            'new':   len(new_map),
             'by_type': defaultdict(int),
         }
         for sd in session_dates:
@@ -483,6 +496,7 @@ def create_app():
         return render_template('day/summary.html',
                                d=d, session_dates=session_dates,
                                coach_map=coach_map, day_totals=day_totals,
+                               new_map=new_map,
                                PAYMENT_TYPES=PAYMENT_TYPES,
                                PAYMENT_COLORS=PAYMENT_COLORS)
 
@@ -1057,6 +1071,7 @@ def create_app():
                     'payment_type': a.payment_type,
                     'amount':       float(a.amount or 0),
                     'voucher_id':   a.voucher_id,
+                    'new_member':   bool(a.new_member),
                 }
 
         # Players who attended within the last 3 months → prioritised in the waiting list
@@ -1086,6 +1101,11 @@ def create_app():
                     'group_name':   a.group.name if a.group else None,
                 }
 
+        # Players with NO attendance before today — the "New player" tickbox
+        # pre-ticks for them at check-in.
+        first_time_ids = [p.id for p in all_players
+                          if p.id not in last_attendance_map]
+
         # Sessions data for JS modal (no group options when groups are disabled)
         use_groups = Setting.get('groups_enabled', '1') == '1'
         sessions_js = [
@@ -1108,6 +1128,7 @@ def create_app():
                                attendance_map=attendance_map,
                                recent_ids=recent_ids,
                                last_attendance_map=last_attendance_map,
+                               first_time_ids=json.dumps(first_time_ids),
                                sessions_js=json.dumps(sessions_js),
                                PAYMENT_TYPES=PAYMENT_TYPES,
                                AMOUNT_TYPES=list(AMOUNT_TYPES),
@@ -1188,6 +1209,16 @@ def create_app():
                   .order_by(Player.name).all())
 
         attendance_map = {a.player_id: a for a in sd.attendance}
+
+        # Anyone with no attendance before this date is a first-timer — the
+        # "New player" tickbox pre-ticks for them.
+        ever_ids = {pid for (pid,) in
+                    db.session.query(Attendance.player_id)
+                    .join(SessionDate, Attendance.session_date_id == SessionDate.id)
+                    .filter(SessionDate.date < sd.date).distinct()}
+        first_time_ids = [p.id for p in regular + walkins + others
+                          if p.id not in ever_ids]
+
         coaches        = Coach.query.filter_by(active=True).order_by(Coach.name).all()
         coach_ids      = {ca.coach_id for ca in
                           CoachAttendance.query.filter_by(session_date_id=sd.id).all()}
@@ -1197,6 +1228,7 @@ def create_app():
                                players=regular + walkins,
                                others=others,
                                attendance_map=attendance_map,
+                               first_time_ids=json.dumps(first_time_ids),
                                coaches=coaches, coach_ids=coach_ids,
                                totals=_totals(sd),
                                day_groups=sd.day_active_groups,
@@ -1216,6 +1248,7 @@ def create_app():
         amount       = float(data.get('amount') or 0)
         group_id     = _int(data.get('group_id'))
         voucher_id   = _int(data.get('voucher_id'))
+        new_member   = bool(data.get('new_member'))
 
         rec = Attendance.query.filter_by(session_date_id=sd_id, player_id=player_id).first()
 
@@ -1253,11 +1286,12 @@ def create_app():
             rec.amount       = amount
             rec.group_id     = group_id
             rec.voucher_id   = voucher_id
+            rec.new_member   = new_member
         else:
             db.session.add(Attendance(
                 session_date_id=sd_id, player_id=player_id,
                 group_id=group_id, payment_type=payment_type, amount=amount,
-                voucher_id=voucher_id,
+                voucher_id=voucher_id, new_member=new_member,
             ))
         db.session.commit()
         db.session.refresh(sd)
@@ -1973,6 +2007,7 @@ def create_app():
             monthly_summary=data['monthly_summary'],
             session_summary=data['session_summary'],
             total_sessions=data['total_sessions'], total_att=data['total_att'],
+            total_new=data['total_new'],
         )
 
     @app.route('/reports/export')
@@ -1992,12 +2027,12 @@ def create_app():
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = 'Monthly Attendance'
-        ws.append(['Month', 'Total Check-ins', 'Sessions Run', 'Avg per Session'])
+        ws.append(['Month', 'Total Check-ins', 'Sessions Run', 'Avg per Session', 'New Players'])
         for cell in ws[1]:
             cell.font = hdr_font; cell.fill = hdr_fill
         for row in data['monthly_summary']:
-            ws.append([row['label'], row['total'], row['sessions'], row['avg']])
-        for col, width in zip('ABCD', (14, 16, 14, 16)):
+            ws.append([row['label'], row['total'], row['sessions'], row['avg'], row['new']])
+        for col, width in zip('ABCDE', (14, 16, 14, 16, 12)):
             ws.column_dimensions[col].width = width
 
         ws2 = wb.create_sheet('Per Session')
@@ -2356,8 +2391,8 @@ def create_app():
 
         # Sheet 3 — Session summary
         ws3 = wb.create_sheet('Session Summary')
-        ws3.append(['Date', 'Session', 'Total', 'Cash', 'Card', 'Voucher', 'Visit Pass', 'Free',
-                    'Cash Total', 'Card Total'])
+        ws3.append(['Date', 'Session', 'Total', 'New Players', 'Cash', 'Card', 'Voucher',
+                    'Visit Pass', 'Free', 'Cash Total', 'Card Total'])
         for cell in ws3[1]:
             cell.font = hdr_font; cell.fill = hdr_fill
 
@@ -2365,6 +2400,7 @@ def create_app():
             ps = sd.payment_summary
             ws3.append([sd.date.strftime('%d %b %Y'), sd.template.name,
                         sd.total_attending,
+                        sum(1 for a in sd.attendance if a.new_member),
                         ps.get('Cash', 0), ps.get('Card', 0), ps.get('Voucher', 0),
                         ps.get('Visit Pass', 0), ps.get('Free', 0),
                         round(sd.total_cash, 2), round(sd.total_card, 2)])
@@ -2790,9 +2826,11 @@ def _reports_data(months, session_filter):
     for sd in dates:
         key = (sd.date.year, sd.date.month)
         if key not in monthly:
-            monthly[key] = {'label': sd.date.strftime('%b %Y'), 'total': 0, 'sessions': 0}
+            monthly[key] = {'label': sd.date.strftime('%b %Y'), 'total': 0,
+                            'sessions': 0, 'new': 0}
         monthly[key]['total']    += sd.total_attending
         monthly[key]['sessions'] += 1
+        monthly[key]['new']      += sum(1 for a in sd.attendance if a.new_member)
     monthly_summary = []
     for key in sorted(monthly.keys()):
         row = monthly[key]
@@ -2814,6 +2852,7 @@ def _reports_data(months, session_filter):
         'session_summary': session_summary,
         'total_sessions':  len(dates),
         'total_att':       sum(sd.total_attending for sd in dates),
+        'total_new':       sum(m['new'] for m in monthly_summary),
     }
 
 

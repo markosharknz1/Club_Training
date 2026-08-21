@@ -116,6 +116,34 @@
   </div>
 </div>
 
+{# ── New players ──────────────────────────────────────────────────── #}
+{% if new_map %}
+<div class="card shadow-sm border-0 mb-4" style="max-width:640px">
+  <div class="card-header fw-semibold">
+    New Players Today
+    <span class="badge bg-warning text-dark ms-1">{{ new_map | length }}</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0" style="font-size:.9rem">
+      <thead class="table-dark">
+        <tr><th>Player</th><th>Session</th></tr>
+      </thead>
+      <tbody>
+        {% for name, sessions in new_map.items() %}
+        <tr>
+          <td class="fw-semibold">{{ name }}</td>
+          <td>{{ sessions | join(', ') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer bg-transparent border-0 text-muted py-2 d-print-none" style="font-size:.75rem">
+    Worth a follow-up hello — new people who feel welcomed come back.
+  </div>
+</div>
+{% endif %}
+
 {# ── Coaches ──────────────────────────────────────────────────────── #}
 {% if coach_tracking_mode != 'off' %}
 <div class="card shadow-sm border-0 mb-4" style="max-width:640px">

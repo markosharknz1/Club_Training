@@ -137,6 +137,7 @@
               <span class="badge bg-{{ PAYMENT_COLORS.get(a.payment_type,'secondary') }} me-1">
                 {{ a.payment_type }}
               </span>
+              {% if a.new_member %}<span class="badge bg-warning text-dark" style="font-size:.65rem">NEW</span>{% endif %}
               {% else %}
               <span class="text-muted small fst-italic">not checked in</span>
               {% endif %}
@@ -152,7 +153,8 @@
                       onclick="openModal({{ p.id }}, {{ p.name|tojson }},
                                {{ a.group_id or p.default_group_id or 'null' }},
                                {{ tmpl.price_cash|float }}, {{ tmpl.price_card|float }},
-                               {{ a.payment_type|tojson }}, {{ (a.amount|float) }})">
+                               {{ a.payment_type|tojson }}, {{ (a.amount|float) }},
+                               {{ 'true' if a.new_member else 'false' }})">
                 ✎
               </button>
               {% else %}
@@ -209,6 +211,12 @@
         <div class="mb-3" id="amount-row" style="display:none">
           <label class="form-label fw-semibold" for="modal-amount">Amount</label>
           <input type="number" id="modal-amount" class="form-control" step="1" min="0" value="0">
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="modal-new-member">
+          <label class="form-check-label" for="modal-new-member">
+            New player <span class="text-muted small">(first time at the club)</span>
+          </label>
         </div>
 
         <div class="mb-3 {% if not groups_enabled %}d-none{% endif %}">
@@ -326,10 +334,11 @@ let currentPlayerId = null;
 let isCheckedIn  = false;
 
 const AMOUNT_TYPES = new Set({{ AMOUNT_TYPES | tojson }});
+const FIRST_TIME   = new Set({{ first_time_ids | safe }});
 
 // ── Open check-in modal ─────────────────────────────────────────────
 function openModal(playerId, playerName, defaultGroupId, cashPrice, cardPrice,
-                   existingType, existingAmount) {
+                   existingType, existingAmount, existingNewMember) {
   currentPlayerId = playerId;
   isCheckedIn     = existingType !== null && existingType !== undefined;
   document.getElementById('modal-player-id').value  = playerId;
@@ -337,6 +346,9 @@ function openModal(playerId, playerName, defaultGroupId, cashPrice, cardPrice,
   document.getElementById('modal-cash-price').value  = cashPrice;
   document.getElementById('modal-card-price').value  = cardPrice;
   document.getElementById('modal-error').classList.add('d-none');
+  // Pre-tick "New player" for first-timers; keep the saved flag when editing
+  document.getElementById('modal-new-member').checked =
+    isCheckedIn ? !!existingNewMember : FIRST_TIME.has(playerId);
 
   // Set group
   const grpSel = document.getElementById('modal-group');
@@ -398,7 +410,7 @@ function confirmCheckin() {
   fetch('/register/' + SD_ID + '/checkin', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ player_id: playerId, payment_type: selectedType, amount, group_id: groupId }),
+    body: JSON.stringify({ player_id: playerId, payment_type: selectedType, amount, group_id: groupId, new_member: document.getElementById('modal-new-member').checked }),
   })
   .then(r => r.json())
   .then(data => {
@@ -408,7 +420,7 @@ function confirmCheckin() {
       return;
     }
     bootstrap.Modal.getInstance(document.getElementById('checkinModal')).hide();
-    updateRow(playerId, selectedType, amount, groupId);
+    updateRow(playerId, selectedType, amount, groupId, document.getElementById('modal-new-member').checked);
     updateTotals(data.totals);
   });
 }
@@ -433,13 +445,14 @@ function undoCheckin() {
 // ── Update a player row ─────────────────────────────────────────────
 const COLORS = {{ PAYMENT_COLORS | tojson }};
 
-function updateRow(playerId, payType, amount, groupId) {
+function updateRow(playerId, payType, amount, groupId, newMember) {
   const row = document.querySelector(`tr[data-player-id="${playerId}"]`);
   if (!row) return;
   row.classList.add('checked-row');
   // Payment cell
   const payCell = row.cells[3];
-  payCell.innerHTML = `<span class="badge bg-${COLORS[payType] || 'secondary'} me-1">${payType}</span>`;
+  payCell.innerHTML = `<span class="badge bg-${COLORS[payType] || 'secondary'} me-1">${payType}</span>`
+    + (newMember ? '<span class="badge bg-warning text-dark" style="font-size:.65rem">NEW</span>' : '');
   // Amount cell
   const amtCell = row.cells[4];
   amtCell.textContent = (payType === 'Cash' || payType === 'Card') ? parseFloat(amount).toFixed(2) : '';
@@ -458,7 +471,7 @@ function updateRow(playerId, payType, amount, groupId) {
   btn.onclick = () => openModal(playerId, row.querySelector('.fw-semibold').textContent.trim(),
     gId, parseFloat(document.getElementById('modal-cash-price').value),
     parseFloat(document.getElementById('modal-card-price').value),
-    payType, amount);
+    payType, amount, newMember);
 }
 
 function clearRow(playerId) {
@@ -519,11 +532,11 @@ function checkInAll() {
     fetch('/register/' + SD_ID + '/checkin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ player_id: pid, payment_type: 'Cash', amount: cashPrice, group_id: null }),
+      body: JSON.stringify({ player_id: pid, payment_type: 'Cash', amount: cashPrice, group_id: null, new_member: FIRST_TIME.has(pid) }),
     })
     .then(r => r.json())
     .then(data => {
-      if (data.ok) { updateRow(pid, 'Cash', cashPrice, null); updateTotals(data.totals); }
+      if (data.ok) { updateRow(pid, 'Cash', cashPrice, null, FIRST_TIME.has(pid)); updateTotals(data.totals); }
     });
   });
 }

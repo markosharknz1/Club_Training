@@ -525,6 +525,20 @@ own machine and demo to other club members (e.g. "Carol").
     markings from a chosen date, labelled an estimate, never touches rows with an amount.
     Mode switches warn via JS (advanced→other: "hidden but not deleted").
 
+35. **"New player" tickbox at check-in** (user: "flag new members with a tickbox… might/might
+    not be a payment type, but we want to record new people"). `Attendance.new_member` boolean
+    (add-only migration), fully independent of payment type. Tickbox appears in BOTH check-in
+    modals (day/checkin.html player-first flow and register/run.html) and **pre-ticks
+    automatically for first-timers** — players with no attendance before that date (server
+    passes `first_time_ids` → JS `FIRST_TIME` set; freshly-created players from the check-in
+    add-player modal always pre-tick). Editing a check-in keeps/toggles the saved flag
+    (carried in the row's `data-checkin` JSON / openModal args). Yellow NEW badges on
+    register + checked-in rows; day summary gains a "New Players Today" card (names +
+    sessions) and `day_totals['new']`; Reports gains a New Players tile + monthly "New"
+    column (`_reports_data` row['new'], total_new); both Excel exports gained New Players
+    columns (monthly export Session Summary sheet + reports Monthly Attendance sheet).
+    The register "Check in all" bulk path auto-flags first-timers too.
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually
@@ -532,14 +546,26 @@ own machine and demo to other club members (e.g. "Carol").
 - **Vouchers used for membership** — the user said "need to look more at that" (i.e. vouchers
   might in future pay for annual membership, not just per-session fees). Explicitly deferred,
   do not build speculatively.
-- **Item 5 of the five-item change spec — PII encryption at rest** — designed but NOT built.
-  Locked decisions from the user: RSA-4096 escrow keypair; escrow slot mandatory but plainly
-  disclosed (first-run wizard + README + Settings → Security & Privacy); two admin passwords
-  (scrypt-wrapped DEK key slots), AES-256-GCM whole-file model adapted to this stack
-  (in-memory SQLite via `sqlite3` serialize/deserialize is the closest Flask equivalent of
-  the spec's sql.js design), atomic writes with `.bak` rotation, recovery CLI in a SEPARATE
-  private repo. Build order within it: key slots + first-run wizard → unlock/lock →
-  whole-file encryption → password change → escrow slot → recovery CLI.
+- **Item 5 — PII encryption at rest** — PARKED by the user (2026-08-21, "lets leave it for
+  now") after the design evolved. Where it landed: the user chose **Option B** — NO password
+  prompt; DEK wrapped by **Windows DPAPI** (auto-unlock tied to the Windows login) + a
+  printable base32 **Recovery Key** shown at enable time for new-machine/restore recovery;
+  AES-256-GCM whole-file encryption with the DB held in an in-memory sqlite3 connection
+  (`serialize`/`deserialize`, needs Python 3.11+; StaticPool + `creator` for SQLAlchemy;
+  save on every `after_commit`, atomic tmp+fsync+replace writes, `.enc.bak` rotation,
+  single-instance lock file since in-memory mode loses SQLite file locking). The original
+  two-admin-passwords + scrypt design was dropped with the user's agreement. OPEN QUESTION
+  when resumed: B alone vs **B + RSA-4096 developer escrow slot** (DEK also wrapped to a
+  developer public key in the keystore so the developer can recover a club that lost both
+  the Windows account and the paper key; recommended, mandatory-but-disclosed, decrypt tool
+  in a separate private repo) — the user was leaning informed but stopped before deciding.
+  A complete `securedb.py` module (DPAPI ctypes, AESGCM file format `CLUBENC1`+nonce+ct,
+  recovery-key encode/decode with checksum, keystore.json with dek_sha256, prepare()/
+  activate()/save_active(), decrypt-on-restart flag, pid lock) was written and then deleted
+  uncommitted when parked — retrieve it from this session's transcript or rewrite from this
+  note. `cryptography` 44.0.0 is ALREADY installed and already bundled by PyInstaller.
+  NOTE: until this ships, OneDrive-synced backups contain plaintext PII — BitLocker on the
+  club machine is the standing advice (Settings → Security & Privacy says so).
 - Nothing else is mid-flight beyond spec item 5.
 
 ## Working-style notes specific to this project

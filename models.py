@@ -302,6 +302,7 @@ class Attendance(db.Model):
     payment_type    = db.Column(db.String(30), nullable=False, default='Cash')
     amount          = db.Column(db.Numeric(8, 2), default=0)
     voucher_id      = db.Column(db.Integer, db.ForeignKey('vouchers.id'))
+    new_member      = db.Column(db.Boolean, nullable=False, default=False)  # ticked at check-in for first-timers
     notes           = db.Column(db.Text)
     marked_at       = db.Column(db.DateTime, default=datetime.utcnow)
 

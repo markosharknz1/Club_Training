@@ -106,10 +106,12 @@
             data-age="{{ p.age if p.age is not none else '' }}"
             data-guardian="{{ p.guardian_name or '' }}"
             data-phone="{{ p.guardian_phone or '' }}"
-            data-checkin="{{ {'sd_id': info.sd_id, 'group_id': info.group_id, 'payment_type': info.payment_type, 'amount': info.amount | int, 'voucher_id': info.voucher_id} | tojson }}"
+            data-checkin="{{ {'sd_id': info.sd_id, 'group_id': info.group_id, 'payment_type': info.payment_type, 'amount': info.amount | int, 'voucher_id': info.voucher_id, 'new_member': info.new_member} | tojson }}"
             style="cursor:pointer;user-select:none">
           <td>
-            <div class="fw-semibold">{{ p.name }}</div>
+            <div class="fw-semibold">{{ p.name }}
+              {% if info.new_member %}<span class="badge bg-warning text-dark ms-1" style="font-size:.6rem">NEW</span>{% endif %}
+            </div>
             {% if p.siblings %}
             <span class="badge bg-info text-dark" style="font-size:.6rem">siblings</span>
             {% endif %}
@@ -249,6 +251,12 @@
           <label class="form-label fw-semibold">Amount</label>
           <div class="form-control-plaintext fw-semibold" id="modal-amount-display">—</div>
           <input type="hidden" id="modal-amount" value="0">
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="modal-new-member">
+            <label class="form-check-label" for="modal-new-member">
+              New player <span class="text-muted small">(first time at the club)</span>
+            </label>
+          </div>
           {% if square_configured %}
           <div class="d-none" id="square-row">
             <button type="button" class="btn btn-outline-primary btn-sm" id="square-charge-btn"
@@ -337,6 +345,7 @@ const DEFAULT_PAY = 'Card';
 const GROUPS_ENABLED = {{ 'true' if groups_enabled else 'false' }};
 const ROW_COLS = GROUPS_ENABLED ? 3 : 2;
 const FIELD_CFG   = {{ field_cfg | tojson }};
+const FIRST_TIME  = new Set({{ first_time_ids | safe }});
 
 // Show/hide optional player fields based on selected Junior/Senior category
 function applyFieldVisibility(prefix, category) {
@@ -374,7 +383,7 @@ let squarePollTimer    = null;
 let squareCheckoutId   = null;
 
 // ── Open check-in modal ─────────────────────────────────────────────
-function openCheckin(pid, name, currentSdId, currentGroupId, currentPayType, currentAmount, currentVoucherId) {
+function openCheckin(pid, name, currentSdId, currentGroupId, currentPayType, currentAmount, currentVoucherId, currentNewMember) {
   currentPlayerId = pid;
   selectedVoucherId = currentVoucherId || null;
   voucherPromptShown = false;
@@ -384,6 +393,9 @@ function openCheckin(pid, name, currentSdId, currentGroupId, currentPayType, cur
   document.getElementById('modal-current-sd-id').value = currentSdId || '';
   document.getElementById('modal-name').textContent   = name;
   document.getElementById('modal-error').classList.add('d-none');
+  // Pre-tick "New player" for first-timers; keep the saved flag when editing
+  document.getElementById('modal-new-member').checked =
+    isCheckedIn ? !!currentNewMember : FIRST_TIME.has(pid);
 
   // Pre-select session (auto-select if only one)
   selectedSdId = currentSdId;
@@ -666,16 +678,17 @@ function confirmCheckin() {
   const groupId   = document.getElementById('modal-group').value || null;
   const amount    = parseFloat(document.getElementById('modal-amount').value) || 0;
   const voucherId = selectedPayType === 'Sports Voucher' ? selectedVoucherId : null;
+  const newMember = document.getElementById('modal-new-member').checked;
   const prevSdId  = parseInt(document.getElementById('modal-current-sd-id').value) || null;
 
   const doCheckin = () => fetch('/register/' + selectedSdId + '/checkin', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({player_id: playerId, payment_type: selectedPayType, amount, group_id: groupId, voucher_id: voucherId}),
+    body: JSON.stringify({player_id: playerId, payment_type: selectedPayType, amount, group_id: groupId, voucher_id: voucherId, new_member: newMember}),
   }).then(r => r.json()).then(data => {
     if (!data.ok) { showError(data.error); return; }
     bootstrap.Modal.getInstance(document.getElementById('checkinModal')).hide();
-    moveToCheckedIn(playerId, selectedSdId, groupId, selectedPayType, amount, voucherId);
+    moveToCheckedIn(playerId, selectedSdId, groupId, selectedPayType, amount, voucherId, newMember);
     updateSessionBadges(data.totals, selectedSdId);
   });
 
@@ -757,7 +770,7 @@ function confirmAddPlayer(force) {
     bootstrap.Modal.getInstance(document.getElementById('addPlayerModal')).hide();
     addPlayerRow(data.player);
     // Open check-in for the new player immediately
-    openCheckin(data.player.id, data.player.name, null, null, null, 0, null);
+    openCheckin(data.player.id, data.player.name, null, null, null, 0, null, true);
   });
 }
 
@@ -777,7 +790,7 @@ function addPlayerRow(player) {
 }
 
 // ── Move players between Waiting / Checked In tables ─────────────────
-function moveToCheckedIn(pid, sdId, groupId, payType, amount, voucherId) {
+function moveToCheckedIn(pid, sdId, groupId, payType, amount, voucherId, newMember) {
   const row = document.querySelector(`tr[data-player-id="${pid}"]`);
   if (!row) return;
   const name        = row.querySelector('.fw-semibold').textContent.trim();
@@ -802,9 +815,10 @@ function moveToCheckedIn(pid, sdId, groupId, payType, amount, voucherId) {
   tr.dataset.phone       = phone;
   tr.dataset.lastSession = lastSession;
   tr.dataset.lastGroup   = lastGroup;
-  tr.dataset.checkin     = JSON.stringify({sd_id: sdId, group_id: groupId ? parseInt(groupId) : null, payment_type: payType, amount: Math.round(amount), voucher_id: voucherId || null});
+  tr.dataset.checkin     = JSON.stringify({sd_id: sdId, group_id: groupId ? parseInt(groupId) : null, payment_type: payType, amount: Math.round(amount), voucher_id: voucherId || null, new_member: !!newMember});
   tr.style.cssText       = 'cursor:pointer;user-select:none';
-  tr.innerHTML = `<td><div class="fw-semibold">${name}</div></td>
+  const newBadge = newMember ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:.6rem">NEW</span>' : '';
+  tr.innerHTML = `<td><div class="fw-semibold">${name}${newBadge}</div></td>
     <td>${sess ? sess.name : ''}</td>`
     + (GROUPS_ENABLED ? `<td class="text-muted">${grp ? grp.name : ''}</td>` : '');
 
@@ -927,7 +941,8 @@ document.addEventListener('dblclick', function(e) {
     ci ? ci.group_id    : null,
     ci ? ci.payment_type: null,
     ci ? ci.amount      : 0,
-    ci ? ci.voucher_id  : null);
+    ci ? ci.voucher_id  : null,
+    ci ? ci.new_member  : null);
 });
 
 document.addEventListener('contextmenu', function(e) {

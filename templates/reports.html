@@ -50,6 +50,14 @@
       </div>
     </div>
   </div>
+  <div class="col-6 col-md-4">
+    <div class="card border-0 shadow-sm text-center">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-warning">{{ total_new }}</div>
+        <div class="text-muted small">New Players</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 {% if total_sessions %}
@@ -75,6 +83,7 @@
               <th class="text-center">Check-ins</th>
               <th class="text-center">Sessions</th>
               <th class="text-center">Avg / Session</th>
+              <th class="text-center">New</th>
             </tr>
           </thead>
           <tbody>
@@ -84,6 +93,7 @@
               <td class="text-center">{{ row.total }}</td>
               <td class="text-center">{{ row.sessions }}</td>
               <td class="text-center">{{ row.avg }}</td>
+              <td class="text-center">{{ row.new or '' }}</td>
             </tr>
             {% endfor %}
           </tbody>
