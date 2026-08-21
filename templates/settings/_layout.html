@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Settings — {{ app_title }}{% endblock %}
+{% block content %}
+
+<h5 class="mb-3 fw-bold">Club Settings</h5>
+
+<div class="row g-4">
+  <div class="col-md-3 col-lg-2">
+    <div class="list-group list-group-flush shadow-sm rounded bg-white" id="settingsNav">
+      {% for key, label in sections %}
+      <a href="/settings/{{ key }}"
+         class="list-group-item list-group-item-action py-2 {% if key == section %}active fw-semibold{% endif %}"
+         style="font-size:.9rem">{{ label }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="col-md-9 col-lg-10">
+    {% block section_content %}{% endblock %}
+  </div>
+</div>
+
+<script>
+// Dirty-state: warn before leaving a settings section with unsaved edits.
+(function () {
+  let dirty = false;
+  document.querySelectorAll('.col-md-9 form').forEach(f => {
+    f.addEventListener('input', () => {
+      dirty = true;
+      document.querySelectorAll('#settingsNav .active').forEach(a => {
+        if (!a.textContent.includes('●')) a.textContent = a.textContent.trim() + ' ●';
+      });
+    });
+    f.addEventListener('submit', () => { dirty = false; });
+  });
+  window.addEventListener('beforeunload', e => {
+    if (dirty) { e.preventDefault(); e.returnValue = ''; }
+  });
+})();
+</script>
+
+{% endblock %}

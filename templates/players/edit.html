@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Edit {{ player.name }} — {{ club_name }}{% endblock %}
+{% block title %}Edit {{ player.name }} — {{ app_title }}{% endblock %}
 {% block content %}
 
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -110,11 +110,13 @@
             <input type="tel" name="guardian_phone" class="form-control"
                    value="{{ player.guardian_phone or '' }}">
           </div>
+          {% if email_fields_enabled %}
           <div class="col-md-6">
             <label class="form-label fw-semibold">Email</label>
             <input type="email" name="guardian_email" class="form-control"
                    value="{{ player.guardian_email or '' }}">
           </div>
+          {% endif %}
         </div>
       </div>
     </div>

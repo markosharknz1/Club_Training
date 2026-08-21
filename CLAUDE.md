@@ -468,6 +468,63 @@ own machine and demo to other club members (e.g. "Carol").
     envelope encryption) is **not built yet** — see spec notes in chat history; it needs a
     Flask/SQLAlchemy redesign of the doc's sql.js design before building.
 
+31. **Rebrand to "Club Training" + selectable club icon** (item 1 of the user's five-item
+    change spec, v1.4.0). All "My Badminton Club" defaults are now "Club Training"; window/tab
+    title format is `Club Training — {club name}` (bare "Club Training" when no name set) via
+    `app_title` in the context processor — page `{% block title %}` blocks all use `app_title`.
+    Navbar 🏸 replaced with the club icon. 28 bundled single-colour SVG icons live in
+    `static/icons/sports/` (Tabler Icons v3.31.0, MIT, vendored from unpkg; `badminton.svg`
+    hand-drawn in Tabler style; see LICENSE.md there; registry = `BUNDLED_ICONS` in app.py).
+    `/api/branding/icon` serves bundled SVG or custom PNG with an ETag keyed on Setting
+    `club_icon_ver` (bumped on every icon change for cache busting). Custom upload (Settings →
+    Club Identity): client-side `<canvas>` cover-crop/resize to 256×256 PNG data URL (no
+    Pillow dependency), server accepts only `data:image/png` + sniffs the PNG magic bytes,
+    2 MB cap, SVG uploads rejected (script risk). Stored base64 in Settings
+    (`club_icon_type/key/blob/mime` — Setting.value is TEXT, fits fine). Bundled icons get
+    `filter:brightness(0) invert(1)` in the dark navbar; custom logos don't (guarded by
+    `club_icon_is_bundled`).
+
+32. **Settings restructured into sections** (item 4). `/settings` → redirect;
+    `/settings/<section>` deep-linkable with left-nav layout (`templates/settings/_layout.html`
+    + one template per section): identity, players (old Player Categories & Fields), sessions
+    (groups toggle), payments (Square), vouchers, coaches, email, security (placeholder →
+    BitLocker advice until encryption ships), data (Excel export, backups info, testing mode),
+    about (APP_VERSION in app.py). POST dispatch lives in `_settings_save(section)`; saves are
+    per-section; `_layout.html` has a dirty-state ● marker + beforeunload warning. Voucher
+    rules are now Settings (`voucher_amount/sessions/max_active/max_per_year` via
+    `_voucher_defaults()`, wired into `_voucher_limit_error` and all creation fallbacks —
+    the old constants remain only as fallback defaults). Old `templates/settings.html` deleted.
+
+33. **Email gating — TWO separate toggles** (item 3; user explicitly chose two independent
+    switches). `email_sending_enabled` (default off; migrated from the old `email_enabled`
+    setting on startup) gates the Email nav item, `/email` pages, `_email_configured()` and
+    the SMTP fields; Settings → Email also has the SMTP2GO sending-limits link and a
+    "Send test email" button (`/settings/email/test`). `email_fields_enabled` (default on)
+    gates player email UI: `_player_field_settings()` force-disables the per-category `email`
+    flag (kills own-email fields everywhere), guardian-email inputs are Jinja-gated in
+    players/edit, players/list add-modal, day/checkin edit-modal, players/detail, and the
+    import column map drops `own_email`/`guardian_email`. CRITICAL pattern: edit routes only
+    update email columns when the key is PRESENT in the form/JSON (`'guardian_email' in
+    request.form` / `in data`) so hidden fields never blank stored addresses — the check-in
+    edit modal omits those keys via Jinja when fields are off.
+
+34. **Coach tracking modes off/simple/advanced + mark-as-paid** (item 2; default `simple`,
+    setting `coach_tracking_mode`, chosen in Settings → Coaches). Schema is ALWAYS full
+    (mode gates UI only, per spec): CoachAttendance gained `paid`, `paid_date`,
+    `payment_reference` (add-only migration). `off` hides the Coach Database nav + day-page
+    and register-page coach sections + summary coaches card, and `/coaches` +
+    `/api/coach-attendance` refuse. `simple` = tick matrix only — all rate badges, hours
+    inputs, amounts, pay totals, payments link and modal pay fields hidden (`adv` flag in
+    day/view.html; day-view JS null-guards the missing elements); ticks still snapshot the
+    current rate silently so a later upgrade keeps history. IMPORTANT: coach edit POST only
+    updates pay fields when `pay_rate` is present in the form, so editing a coach in simple
+    mode can't reset a stored rate to 0. `advanced` = everything from v1.3.0 plus per-coach
+    per-month **Mark paid** (`POST /coach-payments/mark-paid`, optional reference, sets
+    row-level paid flags; undo supported; Paid columns added to both CSVs) and the optional
+    **backfill** (`POST /settings/coaches/backfill`): applies current rates to $0-rate
+    markings from a chosen date, labelled an estimate, never touches rows with an amount.
+    Mode switches warn via JS (advanced→other: "hidden but not deleted").
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually
@@ -475,7 +532,15 @@ own machine and demo to other club members (e.g. "Carol").
 - **Vouchers used for membership** — the user said "need to look more at that" (i.e. vouchers
   might in future pay for annual membership, not just per-session fees). Explicitly deferred,
   do not build speculatively.
-- Nothing else is mid-flight; the last few sessions ended with everything committed and pushed.
+- **Item 5 of the five-item change spec — PII encryption at rest** — designed but NOT built.
+  Locked decisions from the user: RSA-4096 escrow keypair; escrow slot mandatory but plainly
+  disclosed (first-run wizard + README + Settings → Security & Privacy); two admin passwords
+  (scrypt-wrapped DEK key slots), AES-256-GCM whole-file model adapted to this stack
+  (in-memory SQLite via `sqlite3` serialize/deserialize is the closest Flask equivalent of
+  the spec's sql.js design), atomic writes with `.bak` rotation, recovery CLI in a SEPARATE
+  private repo. Build order within it: key slots + first-run wizard → unlock/lock →
+  whole-file encryption → password change → escrow slot → recovery CLI.
+- Nothing else is mid-flight beyond spec item 5.
 
 ## Working-style notes specific to this project
 

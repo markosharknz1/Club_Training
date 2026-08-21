@@ -1,0 +1,94 @@
+{% extends 'settings/_layout.html' %}
+{% block section_content %}
+
+<div class="card shadow-sm border-0" style="max-width:560px">
+  <div class="card-header fw-semibold">Email</div>
+  <div class="card-body">
+    <form method="post" action="/settings/email">
+      <div class="form-check form-switch mb-1">
+        <input class="form-check-input" type="checkbox" role="switch" name="email_fields_enabled"
+               id="email-fields-toggle" value="1" {% if email_fields_enabled %}checked{% endif %}>
+        <label class="form-check-label fw-semibold" for="email-fields-toggle">
+          Email fields in the player database</label>
+      </div>
+      <div class="form-text mb-3">Show email address fields on player records, imports and
+        exports. Turn off if this club doesn't keep email addresses at all. Stored addresses
+        are kept, just hidden.</div>
+
+      <div class="form-check form-switch mb-1">
+        <input class="form-check-input" type="checkbox" role="switch" name="email_sending_enabled"
+               id="email-sending-toggle" value="1" {% if email_sending_enabled %}checked{% endif %}>
+        <label class="form-check-label fw-semibold" for="email-sending-toggle">
+          Email sending (SMTP2GO / external provider)</label>
+      </div>
+      <div class="form-text mb-3">Enables the Email page for announcements (tournaments etc.)
+        and the SMTP settings below. Works with SMTP2GO or any standard SMTP provider.</div>
+
+      <div id="smtpFields" {% if not email_sending_enabled %}class="d-none"{% endif %}>
+        <hr>
+        <p class="small mb-3">
+          Bulk email providers apply sending limits that vary by plan and account age. If you're
+          using SMTP2GO, read their guide to sending limits before your first large send:
+          <a href="https://www.smtp2go.com/blog/know-your-sending-limits/"
+             target="_blank" rel="noopener noreferrer">SMTP2GO Sending Limits: Every Cap, Why It
+          Exists, and How to Lift It</a>.
+        </p>
+        <p class="text-muted small mb-3">Leave the password blank when saving to keep the stored
+          one unchanged.</p>
+        <div class="row g-2 mb-3">
+          <div class="col-8">
+            <label class="form-label fw-semibold">SMTP server</label>
+            <input type="text" name="smtp_host" class="form-control" value="{{ smtp_host }}">
+          </div>
+          <div class="col-4">
+            <label class="form-label fw-semibold">Port</label>
+            <input type="number" name="smtp_port" class="form-control" value="{{ smtp_port }}">
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">SMTP username</label>
+          <input type="text" name="smtp_username" class="form-control" value="{{ smtp_username }}" autocomplete="off">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">SMTP password</label>
+          <input type="password" name="smtp_password" class="form-control" autocomplete="off"
+                 placeholder="{{ '•••••••• (already set — leave blank to keep)' if smtp_password_set else 'Your SMTP2GO SMTP password' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">From address</label>
+          <input type="email" name="email_from" class="form-control" value="{{ email_from }}"
+                 placeholder="e.g. club@yourdomain.com">
+          <div class="form-text">Must be a sender address/domain verified in your SMTP2GO account.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">From name</label>
+          <input type="text" name="email_from_name" class="form-control" value="{{ email_from_name }}"
+                 placeholder="Defaults to the club name">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary">Save</button>
+    </form>
+  </div>
+</div>
+
+{% if email_sending_enabled %}
+<div class="card shadow-sm border-0 mt-4" style="max-width:560px">
+  <div class="card-header fw-semibold">Send a test email</div>
+  <div class="card-body">
+    <p class="text-muted small mb-2">Save your SMTP details first, then send yourself a test to
+      confirm everything works before emailing the whole club.</p>
+    <form method="post" action="/settings/email/test" class="d-flex gap-2">
+      <input type="email" name="test_to" class="form-control" placeholder="you@example.com" required>
+      <button type="submit" class="btn btn-outline-primary text-nowrap">Send test</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<script>
+document.getElementById('email-sending-toggle').addEventListener('change', function () {
+  document.getElementById('smtpFields').classList.toggle('d-none', !this.checked);
+});
+</script>
+
+{% endblock %}

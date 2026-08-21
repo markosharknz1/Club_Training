@@ -1,8 +1,9 @@
 """
-Badminton Club — junior session management
+Club Training — club session management
 Run:  python app.py
 """
 import calendar as _cal_mod
+import base64
 import glob, json, os, shutil, smtplib, socket, sys, threading, time, webbrowser
 import requests
 from email.mime.text import MIMEText
@@ -18,6 +19,42 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     CoachAttendance,
                     PAYMENT_TYPES, AMOUNT_TYPES, DAY_NAMES, PAYMENT_COLORS,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
+
+
+APP_VERSION = '1.4.0'
+
+# ─── Branding ───────────────────────────────────────────────────────
+# Bundled club icons (static/icons/sports/<key>.svg — see LICENSE.md there).
+BUNDLED_ICONS = [
+    ('badminton',       'Badminton'),
+    ('ball-tennis',     'Tennis'),
+    ('ping-pong',       'Table tennis'),
+    ('ball-basketball', 'Basketball / Netball'),
+    ('ball-football',   'Football (soccer)'),
+    ('ball-volleyball', 'Volleyball'),
+    ('ball-baseball',   'Baseball / Softball'),
+    ('cricket',         'Cricket'),
+    ('golf',            'Golf'),
+    ('play-handball',   'Handball / Hockey'),
+    ('swimming',        'Swimming'),
+    ('run',             'Running / Athletics'),
+    ('bike',            'Cycling'),
+    ('gymnastics',      'Gymnastics'),
+    ('karate',          'Martial arts'),
+    ('ice-skating',     'Skating'),
+    ('curling',         'Curling'),
+    ('music',           'Dance / Music'),
+    ('ball-bowling',    'Bowling / Generic ball'),
+    ('trophy',          'Trophy'),
+    ('medal',           'Medal'),
+    ('award',           'Award'),
+    ('star',            'Star'),
+    ('calendar-event',  'Calendar'),
+    ('flag',            'Flag'),
+    ('users-group',     'Group of people'),
+    ('clipboard-list',  'Clipboard / Roster'),
+    ('stopwatch',       'Stopwatch'),
+]
 
 
 # ─── App factory ────────────────────────────────────────────────────
@@ -95,7 +132,13 @@ def create_app():
     with app.app_context():
         db.create_all()
         if not Setting.query.get('club_name'):
-            db.session.add(Setting(key='club_name', value='My Badminton Club'))
+            db.session.add(Setting(key='club_name', value='Club Training'))
+        # Rename migration: the single email_enabled flag became
+        # email_sending_enabled (fields have their own toggle, default on).
+        if (not Setting.query.get('email_sending_enabled')
+                and Setting.query.get('email_enabled')):
+            db.session.add(Setting(key='email_sending_enabled',
+                                   value=Setting.query.get('email_enabled').value))
             db.session.commit()
         # Lightweight migrations: older DBs won't have these columns yet.
         cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(attendance)")).fetchall()]
@@ -128,6 +171,12 @@ def create_app():
             db.session.execute(db.text("ALTER TABLE coaches ADD COLUMN pay_rate NUMERIC(8,2) NOT NULL DEFAULT 0"))
             db.session.execute(db.text("ALTER TABLE coaches ADD COLUMN pay_basis VARCHAR(10) NOT NULL DEFAULT 'session'"))
             db.session.execute(db.text("ALTER TABLE coaches ADD COLUMN notes VARCHAR(200)"))
+            db.session.commit()
+        ca_cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(coach_attendance)")).fetchall()]
+        if ca_cols and 'paid' not in ca_cols:
+            db.session.execute(db.text("ALTER TABLE coach_attendance ADD COLUMN paid BOOLEAN NOT NULL DEFAULT 0"))
+            db.session.execute(db.text("ALTER TABLE coach_attendance ADD COLUMN paid_date DATE"))
+            db.session.execute(db.text("ALTER TABLE coach_attendance ADD COLUMN payment_reference VARCHAR(100)"))
             db.session.commit()
         # One-time: carry historic coach markings (old session_date_coaches m2m)
         # into CoachAttendance, snapshotting each coach's CURRENT rate.
@@ -193,13 +242,51 @@ def create_app():
                 'sessions' if ep == 'sessions'           else
                 'coaches'  if ep == 'coaches'            else
                 'settings' if ep == 'settings'           else '')
+        club = Setting.get('club_name', 'Club Training')
         return {
-            'club_name':      Setting.get('club_name', 'My Badminton Club'),
+            'club_name':      club,
+            'app_title':      (f'Club Training — {club}'
+                               if club and club != 'Club Training'
+                               else 'Club Training'),
+            'club_icon_href': url_for('branding_icon') + '?v='
+                              + Setting.get('club_icon_ver', '0'),
+            'club_icon_is_bundled':
+                Setting.get('club_icon_type', 'bundled') == 'bundled',
             'today':          date.today(),
             'active_page':    page,
             'testing_mode':   Setting.get('testing_mode', '0') == '1',
             'groups_enabled': Setting.get('groups_enabled', '1') == '1',
+            'email_sending_enabled': Setting.get('email_sending_enabled', '0') == '1',
+            'email_fields_enabled':  Setting.get('email_fields_enabled', '1') == '1',
+            'coach_tracking_mode':   Setting.get('coach_tracking_mode', 'simple'),
         }
+
+    # ── Branding (club icon) ──────────────────────────────────────────
+
+    @app.route('/api/branding/icon')
+    def branding_icon():
+        from flask import Response
+        ver  = Setting.get('club_icon_ver', '0')
+        etag = f'"icon-{ver}"'
+        if request.headers.get('If-None-Match') == etag:
+            return Response(status=304, headers={'ETag': etag})
+        if Setting.get('club_icon_type', 'bundled') == 'custom':
+            try:
+                blob = base64.b64decode(Setting.get('club_icon_blob', ''))
+            except Exception:
+                blob = b''
+            if blob:
+                return Response(blob,
+                                mimetype=Setting.get('club_icon_mime', 'image/png'),
+                                headers={'ETag': etag,
+                                         'Cache-Control': 'max-age=3600'})
+        key = Setting.get('club_icon_key', 'badminton')
+        if key not in {k for k, _ in BUNDLED_ICONS}:
+            key = 'badminton'
+        path = os.path.join(app.static_folder, 'icons', 'sports', f'{key}.svg')
+        with open(path, 'rb') as f:
+            return Response(f.read(), mimetype='image/svg+xml',
+                            headers={'ETag': etag, 'Cache-Control': 'max-age=3600'})
 
     # ── Home → redirect to today's day view ──────────────────────────
 
@@ -254,6 +341,8 @@ def create_app():
     def api_coach_attendance():
         """Instant coach mark/unmark (and hours edit) for one session occurrence.
         Body: {sd_id, coach_id, present, hours?, force?}"""
+        if _coach_mode() == 'off':
+            return jsonify({'ok': False, 'error': 'Coach tracking is turned off.'})
         data     = request.get_json()
         sd       = SessionDate.query.get_or_404(int(data['sd_id']))
         coach    = Coach.query.get_or_404(int(data['coach_id']))
@@ -675,6 +764,11 @@ def create_app():
                     if h in aliases:
                         col[field] = j
                         break
+            # Email columns are ignored entirely when email fields are off
+            # (Settings → Email), so imports can't sneak addresses back in.
+            if Setting.get('email_fields_enabled', '1') != '1':
+                col.pop('own_email', None)
+                col.pop('guardian_email', None)
 
             if 'name' not in col and not ('given' in col or 'surname' in col):
                 flash('Could not find a name column (looked for "name" or "given"/"surname" headers).', 'danger')
@@ -829,9 +923,13 @@ def create_app():
             p.category           = request.form.get('category', 'Junior')
             p.guardian_name      = request.form.get('guardian_name', '').strip()
             p.guardian_phone     = request.form.get('guardian_phone', '').strip()
-            p.guardian_email     = request.form.get('guardian_email', '').strip()
+            # Email inputs are absent from the form when email fields are
+            # turned off — don't blank stored addresses in that case.
+            if 'guardian_email' in request.form:
+                p.guardian_email = request.form.get('guardian_email', '').strip()
             p.address            = request.form.get('address', '').strip() or None
-            p.own_email          = request.form.get('own_email', '').strip() or None
+            if 'own_email' in request.form:
+                p.own_email      = request.form.get('own_email', '').strip() or None
             p.own_phone          = request.form.get('own_phone', '').strip() or None
             p.default_session_id = _int(request.form.get('session_id'))
             p.default_group_id   = _int(request.form.get('group_id'))
@@ -1014,8 +1112,8 @@ def create_app():
                                PAYMENT_TYPES=PAYMENT_TYPES,
                                AMOUNT_TYPES=list(AMOUNT_TYPES),
                                PAYMENT_COLORS=PAYMENT_COLORS,
-                               DEFAULT_VOUCHER_AMOUNT=DEFAULT_VOUCHER_AMOUNT,
-                               DEFAULT_VOUCHER_SESSIONS=DEFAULT_VOUCHER_SESSIONS,
+                               DEFAULT_VOUCHER_AMOUNT=_voucher_defaults()['amount'],
+                               DEFAULT_VOUCHER_SESSIONS=_voucher_defaults()['sessions'],
                                square_configured=_square_configured(),
                                field_cfg=_player_field_settings())
 
@@ -1264,8 +1362,8 @@ def create_app():
             if action == 'add':
                 player_id   = int(request.form['player_id'])
                 voucher_num = request.form.get('voucher_number', '').strip() or None
-                amount      = float(request.form.get('amount') or DEFAULT_VOUCHER_AMOUNT)
-                sessions    = int(request.form.get('sessions_total') or DEFAULT_VOUCHER_SESSIONS)
+                amount      = float(request.form.get('amount') or _voucher_defaults()['amount'])
+                sessions    = int(request.form.get('sessions_total') or _voucher_defaults()['sessions'])
                 issued_str  = request.form.get('date_issued') or date.today().isoformat()
                 issued_date = date.fromisoformat(issued_str)
                 notes       = request.form.get('notes', '').strip() or None
@@ -1307,8 +1405,8 @@ def create_app():
         return render_template('vouchers.html',
                                voucher_list=voucher_list, year=year, available_years=available_years,
                                active_players=active_players,
-                               DEFAULT_VOUCHER_AMOUNT=DEFAULT_VOUCHER_AMOUNT,
-                               DEFAULT_VOUCHER_SESSIONS=DEFAULT_VOUCHER_SESSIONS)
+                               DEFAULT_VOUCHER_AMOUNT=_voucher_defaults()['amount'],
+                               DEFAULT_VOUCHER_SESSIONS=_voucher_defaults()['sessions'])
 
     @app.route('/vouchers/<int:voucher_id>/pdf')
     def voucher_pdf(voucher_id):
@@ -1329,7 +1427,7 @@ def create_app():
         buf    = io.BytesIO()
         doc    = SimpleDocTemplate(buf, pagesize=A4, topMargin=20 * mm, bottomMargin=20 * mm)
         styles = getSampleStyleSheet()
-        club_name = Setting.get('club_name', 'My Badminton Club')
+        club_name = Setting.get('club_name', 'Club Training')
         elements = [
             Paragraph(club_name, styles['Title']),
             Paragraph('Sports Voucher Usage Record', styles['Heading2']),
@@ -1474,7 +1572,8 @@ def create_app():
                         continue
                 return None
 
-            per_session = float(DEFAULT_VOUCHER_AMOUNT) / DEFAULT_VOUCHER_SESSIONS
+            vd_ = _voucher_defaults()
+            per_session = float(vd_['amount']) / vd_['sessions']
             find_player, fuzzy_notes = _build_player_matcher(Player.query.all())
             existing_numbers = {v.voucher_number.lower()
                                 for v in Voucher.query.filter(Voucher.voucher_number.isnot(None)).all()}
@@ -1516,13 +1615,13 @@ def create_app():
                     notes    = cell(row, 'notes') or f'Imported balance — {remaining} sessions remaining'
                 else:
                     try:
-                        amount = float(cell(row, 'amount') or DEFAULT_VOUCHER_AMOUNT)
+                        amount = float(cell(row, 'amount') or _voucher_defaults()['amount'])
                     except ValueError:
-                        amount = DEFAULT_VOUCHER_AMOUNT
+                        amount = _voucher_defaults()['amount']
                     try:
-                        sessions = int(float(cell(row, 'sessions') or DEFAULT_VOUCHER_SESSIONS))
+                        sessions = int(float(cell(row, 'sessions') or _voucher_defaults()['sessions']))
                     except ValueError:
-                        sessions = DEFAULT_VOUCHER_SESSIONS
+                        sessions = _voucher_defaults()['sessions']
                     notes = cell(row, 'notes') or None
 
                 db.session.add(Voucher(
@@ -1571,8 +1670,8 @@ def create_app():
     def api_player_voucher_create(player_id):
         Player.query.get_or_404(player_id)
         data     = request.get_json() or {}
-        amount   = float(data.get('amount') or DEFAULT_VOUCHER_AMOUNT)
-        sessions = int(data.get('sessions_total') or DEFAULT_VOUCHER_SESSIONS)
+        amount   = float(data.get('amount') or _voucher_defaults()['amount'])
+        sessions = int(data.get('sessions_total') or _voucher_defaults()['sessions'])
         issued_date = date.today()
         limit_error = _voucher_limit_error(player_id, issued_date)
         if limit_error:
@@ -1590,8 +1689,14 @@ def create_app():
 
     # ── Coaches ──────────────────────────────────────────────────────
 
+    def _coach_mode():
+        return Setting.get('coach_tracking_mode', 'simple')
+
     @app.route('/coaches', methods=['GET', 'POST'])
     def coaches():
+        if _coach_mode() == 'off':
+            flash('Coach tracking is turned off — enable it in Club Settings → Coaches.', 'warning')
+            return redirect(url_for('settings_section', section='coaches'))
         if request.method == 'POST':
             action = request.form.get('action')
 
@@ -1618,7 +1723,11 @@ def create_app():
             elif action == 'edit':
                 c = Coach.query.get_or_404(int(request.form['coach_id']))
                 rate, basis, notes = _pay_fields()
-                rate_changed = (int(float(c.pay_rate or 0)) != rate
+                # Pay fields are absent from the form in Simple mode — never
+                # reset a stored rate just because the inputs were hidden.
+                if 'pay_rate' not in request.form:
+                    rate, basis = c.pay_rate, c.pay_basis
+                rate_changed = (int(float(c.pay_rate or 0)) != int(float(rate or 0))
                                 or c.pay_basis != basis)
                 c.name  = request.form['name'].strip()
                 c.phone = request.form.get('phone', '').strip()
@@ -1669,7 +1778,8 @@ def create_app():
         for ca in sorted(rows, key=lambda x: (x.coach.name, x.session_date.date)):
             e = by_coach.setdefault(ca.coach_id, {
                 'coach': ca.coach, 'sessions': 0, 'hours': 0.0,
-                'gross': 0.0, 'adjust': 0.0, 'net': 0.0, 'rows': []})
+                'gross': 0.0, 'adjust': 0.0, 'net': 0.0, 'rows': [],
+                'all_paid': True, 'paid_date': None, 'paid_ref': ''})
             e['sessions'] += 1
             if ca.basis_snapshot == 'hour' and ca.hours is not None:
                 e['hours'] += float(ca.hours)
@@ -1677,6 +1787,11 @@ def create_app():
             e['adjust'] += float(ca.adjustment or 0)
             e['net']    += ca.net_amount
             e['rows'].append(ca)
+            if ca.paid:
+                e['paid_date'] = ca.paid_date or e['paid_date']
+                e['paid_ref']  = ca.payment_reference or e['paid_ref']
+            else:
+                e['all_paid'] = False
         payable    = [e for e in by_coach.values() if not e['coach'].is_volunteer]
         volunteers = [e for e in by_coach.values() if e['coach'].is_volunteer]
         totals = {
@@ -1689,6 +1804,10 @@ def create_app():
 
     @app.route('/coach-payments')
     def coach_payments():
+        if _coach_mode() != 'advanced':
+            flash('Coach payments need Advanced coach tracking — switch modes in '
+                  'Club Settings → Coaches.', 'warning')
+            return redirect(url_for('settings_section', section='coaches'))
         month_str = request.args.get('month', '')
         try:
             year, month = (int(x) for x in month_str.split('-'))
@@ -1729,6 +1848,40 @@ def create_app():
                   'changes.', 'warning')
         return redirect(url_for('coach_payments', month=month_key))
 
+    @app.route('/coach-payments/mark-paid', methods=['POST'])
+    def coach_payments_mark_paid():
+        """Mark (or unmark) one coach's whole month as paid, with an optional
+        payment reference. Row-level flags so partial months still make sense."""
+        if _coach_mode() != 'advanced':
+            return redirect(url_for('settings_section', section='coaches'))
+        month_key = request.form.get('month', '')
+        try:
+            year, month = (int(x) for x in month_key.split('-'))
+            start = date(year, month, 1)
+        except (ValueError, TypeError):
+            return redirect(url_for('coach_payments'))
+        end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+        coach = Coach.query.get_or_404(int(request.form['coach_id']))
+        rows = (CoachAttendance.query.join(SessionDate)
+                .filter(CoachAttendance.coach_id == coach.id,
+                        SessionDate.date >= start, SessionDate.date < end).all())
+        if request.form.get('unmark'):
+            for ca in rows:
+                ca.paid, ca.paid_date, ca.payment_reference = False, None, None
+            db.session.commit()
+            flash(f'{coach.name} — {start.strftime("%B %Y")} marked as UNPAID again.', 'warning')
+        else:
+            ref = request.form.get('reference', '').strip()[:100]
+            for ca in rows:
+                ca.paid = True
+                ca.paid_date = date.today()
+                if ref:
+                    ca.payment_reference = ref
+            db.session.commit()
+            flash(f'{coach.name} — {start.strftime("%B %Y")} marked as paid'
+                  f'{f" (ref: {ref})" if ref else ""}.', 'success')
+        return redirect(url_for('coach_payments', month=month_key))
+
     @app.route('/api/coach-attendance/adjust', methods=['POST'])
     def api_coach_adjust():
         """Set a one-off adjustment (+/- whole dollars) on one attendance row."""
@@ -1765,7 +1918,8 @@ def create_app():
         w = csv_mod.writer(buf)
         if kind == 'detail':
             w.writerow(['Coach', 'Date', 'Session', 'Basis', 'Hours', 'Rate',
-                        'Amount', 'Adjustment', 'Adjustment Reason', 'Net'])
+                        'Amount', 'Adjustment', 'Adjustment Reason', 'Net',
+                        'Paid', 'Paid Date', 'Payment Reference'])
             for e in payable + volunteers:
                 for ca in e['rows']:
                     w.writerow([
@@ -1778,18 +1932,22 @@ def create_app():
                         round(float(ca.amount or 0)),
                         round(float(ca.adjustment or 0)),
                         ca.adjustment_reason or '',
-                        round(ca.net_amount)])
+                        round(ca.net_amount),
+                        'Yes' if ca.paid else '',
+                        ca.paid_date.isoformat() if ca.paid_date else '',
+                        ca.payment_reference or ''])
             fname = f'coach-payments-detail-{year:04d}-{month:02d}.csv'
         else:
             w.writerow(['Coach', 'Sessions', 'Hours', 'Gross', 'Adjustments',
-                        'Net Pay', 'Status'])
+                        'Net Pay', 'Status', 'Paid'])
             for e in payable:
                 w.writerow([e['coach'].name, e['sessions'],
                             e['hours'] or '', round(e['gross']),
-                            round(e['adjust']), round(e['net']), 'Payable'])
+                            round(e['adjust']), round(e['net']), 'Payable',
+                            'Yes' if e['all_paid'] and e['rows'] else ''])
             for e in volunteers:
                 w.writerow([e['coach'].name, e['sessions'], '', 0, 0, 0,
-                            'Volunteer'])
+                            'Volunteer', ''])
             w.writerow([])
             w.writerow(['TOTAL PAYABLE', totals['sessions'], '',
                         round(totals['gross']), round(totals['adjust']),
@@ -1860,66 +2018,221 @@ def create_app():
 
     # ── Settings ─────────────────────────────────────────────────────
 
-    @app.route('/settings', methods=['GET', 'POST'])
-    def settings():
-        if request.method == 'POST':
-            section = request.form.get('section', 'general')
-            if section == 'general':
-                name = request.form.get('club_name', '').strip() or 'My Badminton Club'
-                Setting.set('club_name', name)
-            elif section == 'testing_mode':
-                Setting.set('testing_mode', '1' if request.form.get('testing_mode') else '0')
-            elif section == 'groups':
-                Setting.set('groups_enabled', '1' if request.form.get('groups_enabled') else '0')
-            elif section == 'email':
-                Setting.set('email_enabled', '1' if request.form.get('email_enabled') else '0')
-                Setting.set('smtp_host', request.form.get('smtp_host', '').strip() or 'mail.smtp2go.com')
-                Setting.set('smtp_port', request.form.get('smtp_port', '').strip() or '2525')
-                Setting.set('smtp_username', request.form.get('smtp_username', '').strip())
-                Setting.set('email_from', request.form.get('email_from', '').strip())
-                Setting.set('email_from_name', request.form.get('email_from_name', '').strip())
-                new_pwd = request.form.get('smtp_password', '').strip()
-                if new_pwd:
-                    Setting.set('smtp_password', new_pwd)
-            elif section == 'square':
-                Setting.set('square_enabled', '1' if request.form.get('square_enabled') else '0')
-                Setting.set('square_environment', request.form.get('square_environment', 'sandbox'))
-                Setting.set('square_location_id', request.form.get('square_location_id', '').strip())
-                Setting.set('square_device_id', request.form.get('square_device_id', '').strip())
-                new_token = request.form.get('square_access_token', '').strip()
-                if new_token:
-                    Setting.set('square_access_token', new_token)
-            elif section == 'player_fields':
-                for cat, default_min, default_max in (('junior', '0', '17'), ('senior', '18', '99')):
-                    age_min = request.form.get(f'{cat}_age_min', '').strip()
-                    age_max = request.form.get(f'{cat}_age_max', '').strip()
-                    Setting.set(f'{cat}_age_min', age_min or default_min)
-                    Setting.set(f'{cat}_age_max', age_max or default_max)
-                    for field in ('age', 'address', 'email', 'parent_contact', 'phone'):
-                        key = f'{cat}_track_{field}'
-                        Setting.set(key, '1' if request.form.get(key) else '0')
-            flash('Settings saved.', 'success')
-            return redirect(url_for('settings'))
+    SETTINGS_SECTIONS = [
+        ('identity', 'Club Identity'),
+        ('players',  'Players'),
+        ('sessions', 'Sessions & Groups'),
+        ('payments', 'Payments'),
+        ('vouchers', 'Vouchers'),
+        ('coaches',  'Coaches'),
+        ('email',    'Email'),
+        ('security', 'Security & Privacy'),
+        ('data',     'Data & Backup'),
+        ('about',    'About'),
+    ]
 
-        return render_template('settings.html',
-                               square_enabled=Setting.get('square_enabled', '0') == '1',
-                               square_environment=Setting.get('square_environment', 'sandbox'),
-                               square_location_id=Setting.get('square_location_id', ''),
-                               square_device_id=Setting.get('square_device_id', ''),
-                               square_token_set=bool(Setting.get('square_access_token', '')),
-                               email_enabled=Setting.get('email_enabled', '0') == '1',
-                               smtp_host=Setting.get('smtp_host', 'mail.smtp2go.com'),
-                               smtp_port=Setting.get('smtp_port', '2525'),
-                               smtp_username=Setting.get('smtp_username', ''),
-                               email_from=Setting.get('email_from', ''),
-                               email_from_name=Setting.get('email_from_name', ''),
-                               smtp_password_set=bool(Setting.get('smtp_password', '')),
-                               field_cfg=_player_field_settings())
+    @app.route('/settings')
+    def settings():
+        return redirect(url_for('settings_section', section='identity'))
+
+    @app.route('/settings/<section>', methods=['GET', 'POST'])
+    def settings_section(section):
+        if section not in {s for s, _ in SETTINGS_SECTIONS}:
+            return redirect(url_for('settings_section', section='identity'))
+
+        if request.method == 'POST':
+            err = _settings_save(section)
+            if err:
+                flash(err, 'danger')
+            else:
+                flash('Settings saved.', 'success')
+            return redirect(url_for('settings_section', section=section))
+
+        ctx = {'sections': SETTINGS_SECTIONS, 'section': section}
+        if section == 'identity':
+            ctx.update(
+                bundled_icons=BUNDLED_ICONS,
+                icon_type=Setting.get('club_icon_type', 'bundled'),
+                icon_key=Setting.get('club_icon_key', 'badminton'))
+        elif section == 'players':
+            ctx.update(field_cfg=_player_field_settings())
+        elif section == 'payments':
+            ctx.update(
+                square_enabled=Setting.get('square_enabled', '0') == '1',
+                square_environment=Setting.get('square_environment', 'sandbox'),
+                square_location_id=Setting.get('square_location_id', ''),
+                square_device_id=Setting.get('square_device_id', ''),
+                square_token_set=bool(Setting.get('square_access_token', '')))
+        elif section == 'vouchers':
+            ctx.update(vd=_voucher_defaults())
+        elif section == 'email':
+            ctx.update(
+                smtp_host=Setting.get('smtp_host', 'mail.smtp2go.com'),
+                smtp_port=Setting.get('smtp_port', '2525'),
+                smtp_username=Setting.get('smtp_username', ''),
+                email_from=Setting.get('email_from', ''),
+                email_from_name=Setting.get('email_from_name', ''),
+                smtp_password_set=bool(Setting.get('smtp_password', '')))
+        elif section == 'about':
+            ctx.update(app_version=APP_VERSION)
+        return render_template(f'settings/{section}.html', **ctx)
+
+    def _settings_save(section):
+        """Apply one settings section's POST. Returns an error string or None."""
+        if section == 'identity':
+            action = request.form.get('icon_action', '')
+            if action == 'bundled':
+                key = request.form.get('icon_key', 'badminton')
+                if key not in {k for k, _ in BUNDLED_ICONS}:
+                    return 'Unknown icon.'
+                Setting.set('club_icon_type', 'bundled')
+                Setting.set('club_icon_key', key)
+                _bump_icon_ver()
+            elif action == 'custom':
+                data_url = request.form.get('icon_data', '')
+                prefix = 'data:image/png;base64,'
+                if not data_url.startswith(prefix):
+                    return 'Icon upload failed — expected a PNG image.'
+                try:
+                    blob = base64.b64decode(data_url[len(prefix):])
+                except Exception:
+                    return 'Icon upload failed — the image data was not valid.'
+                # Sniff magic bytes: never trust the declared type
+                if not blob.startswith(b'\x89PNG\r\n\x1a\n'):
+                    return 'Icon upload failed — the file is not a valid PNG.'
+                if len(blob) > 2 * 1024 * 1024:
+                    return 'Icon upload failed — the image is over 2 MB.'
+                Setting.set('club_icon_type', 'custom')
+                Setting.set('club_icon_blob', base64.b64encode(blob).decode())
+                Setting.set('club_icon_mime', 'image/png')
+                _bump_icon_ver()
+            elif action == 'remove_custom':
+                Setting.set('club_icon_type', 'bundled')
+                Setting.set('club_icon_blob', '')
+                _bump_icon_ver()
+            name = request.form.get('club_name', '').strip() or 'Club Training'
+            Setting.set('club_name', name)
+        elif section == 'players':
+            for cat, default_min, default_max in (('junior', '0', '17'), ('senior', '18', '99')):
+                age_min = request.form.get(f'{cat}_age_min', '').strip()
+                age_max = request.form.get(f'{cat}_age_max', '').strip()
+                Setting.set(f'{cat}_age_min', age_min or default_min)
+                Setting.set(f'{cat}_age_max', age_max or default_max)
+                for field in ('age', 'address', 'email', 'parent_contact', 'phone'):
+                    key = f'{cat}_track_{field}'
+                    Setting.set(key, '1' if request.form.get(key) else '0')
+        elif section == 'sessions':
+            Setting.set('groups_enabled', '1' if request.form.get('groups_enabled') else '0')
+        elif section == 'payments':
+            Setting.set('square_enabled', '1' if request.form.get('square_enabled') else '0')
+            Setting.set('square_environment', request.form.get('square_environment', 'sandbox'))
+            Setting.set('square_location_id', request.form.get('square_location_id', '').strip())
+            Setting.set('square_device_id', request.form.get('square_device_id', '').strip())
+            new_token = request.form.get('square_access_token', '').strip()
+            if new_token:
+                Setting.set('square_access_token', new_token)
+        elif section == 'vouchers':
+            for key, default in (('voucher_amount', '100'),
+                                 ('voucher_sessions', '10'),
+                                 ('voucher_max_active', '2'),
+                                 ('voucher_max_per_year', '2')):
+                raw = request.form.get(key, '').strip()
+                try:
+                    val = max(1, int(raw))
+                except ValueError:
+                    val = int(default)
+                Setting.set(key, str(val))
+        elif section == 'coaches':
+            mode = request.form.get('coach_tracking_mode', 'simple')
+            if mode not in ('off', 'simple', 'advanced'):
+                mode = 'simple'
+            Setting.set('coach_tracking_mode', mode)
+        elif section == 'email':
+            Setting.set('email_sending_enabled', '1' if request.form.get('email_sending_enabled') else '0')
+            Setting.set('email_fields_enabled', '1' if request.form.get('email_fields_enabled') else '0')
+            Setting.set('smtp_host', request.form.get('smtp_host', '').strip() or 'mail.smtp2go.com')
+            Setting.set('smtp_port', request.form.get('smtp_port', '').strip() or '2525')
+            Setting.set('smtp_username', request.form.get('smtp_username', '').strip())
+            Setting.set('email_from', request.form.get('email_from', '').strip())
+            Setting.set('email_from_name', request.form.get('email_from_name', '').strip())
+            new_pwd = request.form.get('smtp_password', '').strip()
+            if new_pwd:
+                Setting.set('smtp_password', new_pwd)
+        elif section == 'data':
+            Setting.set('testing_mode', '1' if request.form.get('testing_mode') else '0')
+        return None
+
+    def _bump_icon_ver():
+        Setting.set('club_icon_ver',
+                    str(int(Setting.get('club_icon_ver', '0') or '0') + 1))
+
+    @app.route('/settings/email/test', methods=['POST'])
+    def settings_email_test():
+        to = request.form.get('test_to', '').strip()
+        if not to:
+            flash('Enter an address to send the test to.', 'warning')
+            return redirect(url_for('settings_section', section='email'))
+        if not _email_configured():
+            flash('Fill in and save the SMTP details first.', 'warning')
+            return redirect(url_for('settings_section', section='email'))
+        club = Setting.get('club_name', 'Club Training')
+        try:
+            sent, failures = _send_bulk_email(
+                f'{club} — test email',
+                f'This is a test email from {club} (Club Training app). '
+                'If you can read this, email sending is working.',
+                [to])
+        except (smtplib.SMTPException, OSError) as e:
+            flash(f'Test email failed: {e} — check the SMTP details.', 'danger')
+            return redirect(url_for('settings_section', section='email'))
+        if sent:
+            flash(f'Test email sent to {to} — check the inbox (and spam folder).', 'success')
+        else:
+            flash(f'Test email failed: {failures[0] if failures else "unknown error"}', 'danger')
+        return redirect(url_for('settings_section', section='email'))
+
+    @app.route('/settings/coaches/backfill', methods=['POST'])
+    def settings_coaches_backfill():
+        """Optional estimate: apply each coach's CURRENT rate to old $0 markings
+        from a chosen date. Rows that already carry an amount are never touched."""
+        try:
+            from_date = date.fromisoformat(request.form.get('from_date', ''))
+        except ValueError:
+            flash('Pick a valid from-date for the backfill.', 'warning')
+            return redirect(url_for('settings_section', section='coaches'))
+        rows = (CoachAttendance.query.join(SessionDate)
+                .filter(SessionDate.date >= from_date,
+                        CoachAttendance.amount == 0,
+                        CoachAttendance.rate_snapshot == 0).all())
+        updated = 0
+        for ca in rows:
+            coach = ca.coach
+            if float(coach.pay_rate or 0) <= 0:
+                continue
+            amount, hours = _coach_pay_amount(coach, ca.session_date.template,
+                                              float(ca.hours) if ca.hours is not None else None)
+            ca.rate_snapshot  = coach.pay_rate
+            ca.basis_snapshot = coach.pay_basis
+            ca.hours          = hours
+            ca.amount         = amount
+            updated += 1
+        db.session.commit()
+        if updated:
+            flash(f'Backfilled {updated} past marking{"s" if updated != 1 else ""} '
+                  'with current rates (estimate).', 'success')
+        else:
+            flash('Nothing to backfill — no $0 markings from that date for coaches '
+                  'with a rate set.', 'info')
+        return redirect(url_for('settings_section', section='coaches'))
+
 
     # ── Email players ────────────────────────────────────────────────
 
     @app.route('/email')
     def email_players():
+        if Setting.get('email_sending_enabled', '0') != '1':
+            flash('Email sending is turned off — enable it in Club Settings → Email.', 'warning')
+            return redirect(url_for('settings_section', section='email'))
         months     = request.args.get('months', 3, type=int)
         session_id = request.args.get('session_id', type=int)
         email_map, missing = _recent_player_emails(months, session_id)
@@ -1984,7 +2297,7 @@ def create_app():
                .order_by(SessionDate.date).all())
         all_players = Player.query.filter_by(active=True).order_by(Player.name).all()
         all_coaches = Coach.query.filter_by(active=True).order_by(Coach.name).all()
-        club = Setting.get('club_name', 'Badminton Club')
+        club = Setting.get('club_name', 'Club Training')
         month_label = f"{calendar.month_name[month]} {year}"
 
         hdr_fill = PatternFill('solid', fgColor='1F4E79')
@@ -2204,9 +2517,13 @@ def create_app():
         p.category       = data.get('category') or p.category
         p.guardian_name  = (data.get('guardian_name') or '').strip() or None
         p.guardian_phone = (data.get('guardian_phone') or '').strip() or None
-        p.guardian_email = (data.get('guardian_email') or '').strip() or None
+        # Keys are omitted by the check-in edit form when email fields are
+        # turned off — never blank stored addresses because a field was hidden.
+        if 'guardian_email' in data:
+            p.guardian_email = (data.get('guardian_email') or '').strip() or None
         p.address        = (data.get('address') or '').strip() or None
-        p.own_email      = (data.get('own_email') or '').strip() or None
+        if 'own_email' in data:
+            p.own_email  = (data.get('own_email') or '').strip() or None
         p.own_phone      = (data.get('own_phone') or '').strip() or None
         p.notes         = (data.get('notes') or '').strip() or None
         dob_str = (data.get('dob') or '').strip()
@@ -2285,7 +2602,7 @@ def _player_field_settings():
             'parent_contact': Setting.get(f'{cat}_track_parent_contact', defaults['parent_contact']) == '1',
             'phone':          Setting.get(f'{cat}_track_phone', defaults['phone']) == '1',
         }
-    return {
+    cfg = {
         'junior': cat_cfg('junior', 0, 17, {
             'age': '1', 'address': '0', 'email': '0', 'parent_contact': '1', 'phone': '0',
         }),
@@ -2293,6 +2610,12 @@ def _player_field_settings():
             'age': '1', 'address': '1', 'email': '1', 'parent_contact': '0', 'phone': '1',
         }),
     }
+    # Global kill-switch (Settings → Email): hides player email fields
+    # everywhere without losing the per-category preference underneath.
+    if Setting.get('email_fields_enabled', '1') != '1':
+        for c in cfg.values():
+            c['email'] = False
+    return cfg
 
 
 def _read_tabular_rows(file_storage):
@@ -2390,7 +2713,7 @@ def _build_player_matcher(players):
 
 
 def _email_configured():
-    return (Setting.get('email_enabled', '0') == '1'
+    return (Setting.get('email_sending_enabled', '0') == '1'
             and bool(Setting.get('smtp_username', ''))
             and bool(Setting.get('smtp_password', ''))
             and bool(Setting.get('email_from', '')))
@@ -2520,16 +2843,35 @@ def _coach_month_finalised(year, month):
     return Setting.get(f'coach_month_final_{year:04d}-{month:02d}', '0') == '1'
 
 
+def _voucher_defaults():
+    """Voucher rules, configurable in Settings → Vouchers (falling back to the
+    original hardcoded Sports Voucher defaults)."""
+    def _int_setting(key, fallback):
+        try:
+            return max(1, int(Setting.get(key, '') or fallback))
+        except ValueError:
+            return fallback
+    return {
+        'amount':       _int_setting('voucher_amount', DEFAULT_VOUCHER_AMOUNT),
+        'sessions':     _int_setting('voucher_sessions', DEFAULT_VOUCHER_SESSIONS),
+        'max_active':   _int_setting('voucher_max_active', 2),
+        'max_per_year': _int_setting('voucher_max_per_year', 2),
+    }
+
+
 def _voucher_limit_error(player_id, issued_date):
     """Returns an error message if creating a voucher for this player/date would
-    breach the 2-active / 2-per-calendar-year Sports Voucher limits, else None."""
+    breach the max-active / max-per-calendar-year voucher limits, else None."""
+    vd = _voucher_defaults()
     vouchers = Voucher.query.filter_by(player_id=player_id).all()
     active_count = sum(1 for v in vouchers if v.sessions_remaining > 0)
-    if active_count >= 2:
-        return 'This child already has 2 active vouchers. Use one up before creating another.'
+    if active_count >= vd['max_active']:
+        return (f'This child already has {vd["max_active"]} active '
+                'vouchers. Use one up before creating another.')
     year_count = sum(1 for v in vouchers if v.date_issued.year == issued_date.year)
-    if year_count >= 2:
-        return f'This child has already been issued 2 vouchers in {issued_date.year} (the yearly maximum).'
+    if year_count >= vd['max_per_year']:
+        return (f'This child has already been issued {vd["max_per_year"]} '
+                f'vouchers in {issued_date.year} (the yearly maximum).')
     return None
 
 
@@ -2623,11 +2965,14 @@ if __name__ == '__main__':
     _wait_for_server(port)
 
     with app.app_context():
-        club_name = Setting.get('club_name', 'Badminton Club')
+        club_name = Setting.get('club_name', 'Club Training')
+    window_title = (f'Club Training — {club_name}'
+                    if club_name and club_name != 'Club Training'
+                    else 'Club Training')
 
     try:
         import webview
-        webview.create_window(club_name, f'http://127.0.0.1:{port}',
+        webview.create_window(window_title, f'http://127.0.0.1:{port}',
                               width=1280, height=850, min_size=(1000, 650))
         webview.start()
     except Exception as e:
@@ -2637,5 +2982,5 @@ if __name__ == '__main__':
         print(f'  Desktop window unavailable ({e.__class__.__name__}: {e}).')
         print('  Falling back to your default browser.\n')
         webbrowser.open(f'http://localhost:{port}')
-        print(f'  {club_name} running at http://localhost:{port}')
+        print(f'  Club Training running at http://localhost:{port}')
         server_thread.join()

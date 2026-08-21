@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}{{ d.strftime('%a %d %b') }} — {{ club_name }}{% endblock %}
+{% block title %}{{ d.strftime('%a %d %b') }} — {{ app_title }}{% endblock %}
 {% block content %}
 
 {# ── Date header ──────────────────────────────────────────────────── #}
@@ -110,10 +110,12 @@
 </div>
 
 {# ── Coaches ───────────────────────────────────────────────────────── #}
+{% if coach_tracking_mode != 'off' %}
+{% set adv = coach_tracking_mode == 'advanced' %}
 <div class="card shadow-sm border-0 mb-4">
   <div class="card-header fw-bold d-flex justify-content-between align-items-center">
     <span>Coaches Present</span>
-    {% if month_finalised %}
+    {% if adv and month_finalised %}
     <span class="badge bg-warning text-dark">{{ d.strftime('%B') }} pay finalised</span>
     {% endif %}
   </div>
@@ -133,12 +135,14 @@
         <tr>
           <td class="fw-semibold">
             {{ c.name }}
-            {% if c.is_volunteer %}
-            <span class="badge bg-light text-muted border ms-1" style="font-size:.65rem">Volunteer</span>
-            {% elif c.pay_basis == 'hour' %}
-            <span class="text-muted small ms-1">${{ c.pay_rate|round|int }}/hr</span>
-            {% else %}
-            <span class="text-muted small ms-1">${{ c.pay_rate|round|int }}/session</span>
+            {% if adv %}
+              {% if c.is_volunteer %}
+              <span class="badge bg-light text-muted border ms-1" style="font-size:.65rem">Volunteer</span>
+              {% elif c.pay_basis == 'hour' %}
+              <span class="text-muted small ms-1">${{ c.pay_rate|round|int }}/hr</span>
+              {% else %}
+              <span class="text-muted small ms-1">${{ c.pay_rate|round|int }}/session</span>
+              {% endif %}
             {% endif %}
           </td>
           {% for sd in session_dates %}
@@ -147,6 +151,7 @@
               data-basis="{{ ca.basis_snapshot if ca else c.pay_basis }}">
             <input type="checkbox" class="form-check-input coach-toggle"
                    {% if ca %}checked{% endif %}>
+            {% if adv %}
             <span class="d-inline-flex align-items-center gap-1 coach-hours-wrap ms-1"
                   {% if not (ca and ca.basis_snapshot == 'hour') %}style="display:none !important"{% endif %}>
               <input type="number" class="form-control form-control-sm coach-hours"
@@ -158,11 +163,13 @@
             <div class="text-muted coach-amount" style="font-size:.7rem">
               {%- if ca and ca.net_amount %}${{ ca.net_amount|round|int }}{% endif -%}
             </div>
+            {% endif %}
           </td>
           {% endfor %}
         </tr>
         {% endfor %}
       </tbody>
+      {% if adv %}
       <tfoot>
         <tr class="table-light">
           <td class="fw-semibold text-muted small">Pay total</td>
@@ -173,10 +180,11 @@
           {% endfor %}
         </tr>
       </tfoot>
+      {% endif %}
     </table>
   </div>
   <div class="card-footer bg-transparent border-0 py-2 px-3 text-muted" style="font-size:.75rem">
-    Ticks save instantly. Set rates on the <a href="/coaches">Coach Database</a> page.
+    Ticks save instantly.{% if adv %} Set rates on the <a href="/coaches">Coach Database</a> page.{% endif %}
   </div>
   {% else %}
   <div class="card-body py-3">
@@ -186,6 +194,7 @@
 </div>
 
 <script>
+// In Simple mode the hours/amount elements don't exist — every use is guarded.
 document.querySelectorAll('.coach-cell').forEach(cell => {
   const toggle    = cell.querySelector('.coach-toggle');
   const hoursWrap = cell.querySelector('.coach-hours-wrap');
@@ -210,11 +219,13 @@ document.querySelectorAll('.coach-cell').forEach(cell => {
       // Reflect server state
       toggle.checked = res.present;
       const hourly = cell.dataset.basis === 'hour';
-      hoursWrap.style.setProperty('display', res.present && hourly ? 'inline-flex' : 'none', 'important');
-      if (res.present && hourly && res.hours !== null && document.activeElement !== hoursIn) {
+      if (hoursWrap) {
+        hoursWrap.style.setProperty('display', res.present && hourly ? 'inline-flex' : 'none', 'important');
+      }
+      if (hoursIn && res.present && hourly && res.hours !== null && document.activeElement !== hoursIn) {
         hoursIn.value = res.hours;
       }
-      amountEl.textContent = (res.present && res.amount) ? '$' + res.amount : '';
+      if (amountEl) amountEl.textContent = (res.present && res.amount) ? '$' + res.amount : '';
       const totalEl = document.querySelector('.session-pay-total[data-sd="' + cell.dataset.sd + '"]');
       if (totalEl) totalEl.textContent = res.session_total ? '$' + res.session_total : '';
     }).catch(() => { if (revert) revert(); });
@@ -224,12 +235,13 @@ document.querySelectorAll('.coach-cell').forEach(cell => {
     const present = toggle.checked;
     send({present: present}, () => { toggle.checked = !present; });
   });
-  hoursIn.addEventListener('change', () => {
+  if (hoursIn) hoursIn.addEventListener('change', () => {
     if (!toggle.checked) return;
     send({present: true, hours: hoursIn.value});
   });
 });
 </script>
+{% endif %}{# coach_tracking_mode != 'off' #}
 
 {% if testing_mode %}
 {# Testing helper — reset this day back to plan page #}

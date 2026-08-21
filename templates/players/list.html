@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Players — {{ club_name }}{% endblock %}
+{% block title %}Players — {{ app_title }}{% endblock %}
 {% block content %}
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -164,10 +164,12 @@
                   <label class="form-label fw-semibold" id="add-guardian-phone-label">Guardian phone</label>
                   <input type="tel" name="guardian_phone" class="form-control">
                 </div>
+                {% if email_fields_enabled %}
                 <div class="col-md-3">
                   <label class="form-label fw-semibold" id="add-guardian-email-label">Guardian email</label>
                   <input type="email" name="guardian_email" class="form-control">
                 </div>
+                {% endif %}
               </div>
             </div>
             <div class="col-md-5">

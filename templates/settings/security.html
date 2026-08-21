@@ -1,0 +1,26 @@
+{% extends 'settings/_layout.html' %}
+{% block section_content %}
+
+<div class="card shadow-sm border-0" style="max-width:640px">
+  <div class="card-header fw-semibold">Security &amp; Privacy</div>
+  <div class="card-body">
+    <p class="small mb-3">
+      The database holds children's names, dates of birth and guardian contact details.
+      Protecting it matters.
+    </p>
+    <h6 class="fw-bold">Protect the whole machine (do this today)</h6>
+    <p class="small mb-3">
+      Turn on <strong>BitLocker / Device Encryption</strong> in Windows Settings →
+      Privacy &amp; security → Device encryption. This encrypts the entire disk, so a stolen
+      or lost laptop doesn't expose the club's data. It's built into Windows and free.
+    </p>
+    <h6 class="fw-bold">Coming soon: app-level encryption</h6>
+    <p class="small text-muted mb-0">
+      A future update will add administrator passwords, database encryption at rest, an audit
+      log, and a developer-held recovery key for when passwords are lost. Until then, full-disk
+      encryption above is the protection that counts.
+    </p>
+  </div>
+</div>
+
+{% endblock %}

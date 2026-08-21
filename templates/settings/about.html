@@ -1,0 +1,28 @@
+{% extends 'settings/_layout.html' %}
+{% block section_content %}
+
+<div class="card shadow-sm border-0" style="max-width:560px">
+  <div class="card-header fw-semibold">About</div>
+  <div class="card-body">
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <img src="{{ club_icon_href }}" alt="" width="48" height="48"
+           style="{% if not club_icon_is_bundled %}border-radius:8px;object-fit:cover{% endif %}">
+      <div>
+        <div class="fw-bold fs-5">Club Training</div>
+        <div class="text-muted small">Version {{ app_version }}</div>
+      </div>
+    </div>
+    <p class="small mb-2">
+      A fully local club attendance, payments and voucher app. All data stays in a single
+      database file on this machine — nothing goes to the cloud unless you set up email
+      or Square.
+    </p>
+    <ul class="small mb-0">
+      <li>Updates: <a href="https://github.com/markosharknz1/Club_Training/releases"
+             target="_blank" rel="noopener noreferrer">GitHub Releases</a></li>
+      <li>Bundled icon licences: <code>static\icons\sports\LICENSE.md</code> (Tabler Icons, MIT)</li>
+    </ul>
+  </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,46 @@
+{% extends 'settings/_layout.html' %}
+{% block section_content %}
+
+<div class="card shadow-sm border-0" style="max-width:560px">
+  <div class="card-header fw-semibold">Payments (Square)</div>
+  <div class="card-body">
+    <p class="text-muted small mb-2">
+      Connect a Square Terminal so Card check-ins can be charged directly on a physical card reader.
+      Leave the access token blank when saving to keep the currently stored one unchanged.
+    </p>
+    <form method="post" action="/settings/payments">
+      <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" role="switch" name="square_enabled"
+               id="square-enabled-toggle" value="1" {% if square_enabled %}checked{% endif %}>
+        <label class="form-check-label fw-semibold" for="square-enabled-toggle">Enable Square Terminal payments</label>
+        <div class="form-text">Off by default. The "Charge on Terminal" button only appears at check-in when this is on
+          and the details below are filled in.</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Environment</label>
+        <select name="square_environment" class="form-select">
+          <option value="sandbox"    {% if square_environment == 'sandbox'    %}selected{% endif %}>Sandbox (testing)</option>
+          <option value="production" {% if square_environment == 'production' %}selected{% endif %}>Production (live)</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Access token</label>
+        <input type="password" name="square_access_token" class="form-control" autocomplete="off"
+               placeholder="{{ '•••••••• (already set — leave blank to keep)' if square_token_set else 'Paste your Square access token' }}">
+        <div class="form-text">From your Square Developer Dashboard. Changeable anytime.</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Location ID</label>
+        <input type="text" name="square_location_id" class="form-control" value="{{ square_location_id }}">
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Terminal Device ID</label>
+        <input type="text" name="square_device_id" class="form-control" value="{{ square_device_id }}">
+        <div class="form-text">The paired device ID of your Square Terminal or Register.</div>
+      </div>
+      <button type="submit" class="btn btn-primary">Save</button>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

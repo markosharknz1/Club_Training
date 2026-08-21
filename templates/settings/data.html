@@ -1,0 +1,50 @@
+{% extends 'settings/_layout.html' %}
+{% block section_content %}
+
+<div class="card shadow-sm border-0" style="max-width:560px">
+  <div class="card-header fw-semibold">Export Data</div>
+  <div class="card-body">
+    <p class="text-muted small mb-2">Download an Excel spreadsheet with attendance, payment, and coach data.</p>
+    <form method="get" action="/export/excel" class="d-flex gap-2 align-items-end">
+      <div>
+        <label class="form-label small fw-semibold mb-1">Month</label>
+        <input type="month" name="month" class="form-control form-control-sm"
+               value="{{ today.strftime('%Y-%m') }}">
+      </div>
+      <button type="submit" class="btn btn-outline-secondary btn-sm">↓ Download Excel</button>
+    </form>
+  </div>
+</div>
+
+<div class="card shadow-sm border-0 mt-4" style="max-width:560px">
+  <div class="card-header fw-semibold">Backups</div>
+  <div class="card-body">
+    <p class="small mb-2">The database is backed up automatically every day the app starts, to
+      two places at once:</p>
+    <ul class="small mb-2">
+      <li><code>backups\</code> next to the app</li>
+      <li><code>Documents\Club_Training Backups\</code> — if your Documents folder is backed up
+        by OneDrive, these copies also go to the cloud</li>
+    </ul>
+    <p class="text-muted small mb-0">The last 30 daily copies are kept in each location. To
+      restore one, close the app and copy the backup file over <code>badminton.db</code> in the
+      app folder.</p>
+  </div>
+</div>
+
+<div class="card shadow-sm border-0 mt-4" style="max-width:560px">
+  <div class="card-header fw-semibold">Testing Mode</div>
+  <div class="card-body">
+    <form method="post" action="/settings/data">
+      <div class="form-check form-switch">
+        <input class="form-check-input" type="checkbox" role="switch" name="testing_mode"
+               id="testing-mode-toggle" value="1" {% if testing_mode %}checked{% endif %}
+               onchange="this.form.submit()">
+        <label class="form-check-label" for="testing-mode-toggle">Testing Mode</label>
+      </div>
+      <div class="form-text">Shows testing helpers (like Reset Day) on day pages. Turn off for normal club use.</div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

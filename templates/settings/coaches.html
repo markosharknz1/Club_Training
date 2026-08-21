@@ -1,0 +1,82 @@
+{% extends 'settings/_layout.html' %}
+{% block section_content %}
+
+<div class="card shadow-sm border-0" style="max-width:640px">
+  <div class="card-header fw-semibold">Coach Tracking</div>
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Coaches themselves are managed on the <a href="/coaches">Coach Database</a> page.
+      This controls how much the app tracks about them. Switching modes never deletes
+      anything — data is hidden, not destroyed, and comes back if you switch again.
+    </p>
+    <form method="post" action="/settings/coaches" id="coachModeForm">
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="radio" name="coach_tracking_mode" value="off"
+               id="cm-off" {% if coach_tracking_mode == 'off' %}checked{% endif %}>
+        <label class="form-check-label" for="cm-off">
+          <span class="fw-semibold">Off</span>
+          <div class="form-text mt-0">No coach features anywhere — for clubs without coaches.
+            The Coach Database page and the Coaches Present section disappear.</div>
+        </label>
+      </div>
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="radio" name="coach_tracking_mode" value="simple"
+               id="cm-simple" {% if coach_tracking_mode == 'simple' %}checked{% endif %}>
+        <label class="form-check-label" for="cm-simple">
+          <span class="fw-semibold">Simple</span> — who coached, and when
+          <div class="form-text mt-0">Tick coaches present on each session and see attendance
+            history. No rates, no money.</div>
+        </label>
+      </div>
+      <div class="form-check mb-3">
+        <input class="form-check-input" type="radio" name="coach_tracking_mode" value="advanced"
+               id="cm-advanced" {% if coach_tracking_mode == 'advanced' %}checked{% endif %}>
+        <label class="form-check-label" for="cm-advanced">
+          <span class="fw-semibold">Advanced</span> — attendance plus pay
+          <div class="form-text mt-0">Everything in Simple, plus pay rates (per session or per
+            hour), month-end payment reports, adjustments, mark-as-paid and CSV extracts.</div>
+        </label>
+      </div>
+      <button type="submit" class="btn btn-primary">Save</button>
+    </form>
+  </div>
+</div>
+
+{% if coach_tracking_mode == 'advanced' %}
+<div class="card shadow-sm border-0 mt-4" style="max-width:640px">
+  <div class="card-header fw-semibold">Backfill pay for old markings <span class="text-muted fw-normal small">(optional)</span></div>
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Sessions marked before a coach had a rate were recorded at $0. This applies each coach's
+      <em>current</em> rate to those old markings from a date you choose.
+      <strong>The result is an estimate</strong> — it assumes today's rate applied back then.
+      Markings that already have an amount are never touched.
+    </p>
+    <form method="post" action="/settings/coaches/backfill" class="d-flex gap-2 align-items-end flex-wrap"
+          onsubmit="return confirm('Apply current coach rates to $0 markings from this date on? This is an estimate and cannot be un-done automatically.')">
+      <div>
+        <label class="form-label small fw-semibold mb-1">From date</label>
+        <input type="date" name="from_date" class="form-control form-control-sm" required>
+      </div>
+      <button type="submit" class="btn btn-outline-primary btn-sm">Apply rates retrospectively</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<script>
+document.getElementById('coachModeForm').addEventListener('submit', function (e) {
+  const was = '{{ coach_tracking_mode }}';
+  const now = this.querySelector('input[name=coach_tracking_mode]:checked').value;
+  if (was === 'advanced' && now !== 'advanced') {
+    if (!confirm('Payment history will be hidden but not deleted. Switch back to Advanced to see it again. Continue?')) {
+      e.preventDefault();
+    }
+  }
+  if (was !== 'advanced' && now === 'advanced') {
+    alert('Advanced mode is on after saving — set each coach\'s pay rate on the Coach Database page. Coaches without a rate are treated as volunteers.');
+  }
+});
+</script>
+
+{% endblock %}

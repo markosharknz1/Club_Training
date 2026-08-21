@@ -1,11 +1,13 @@
 {% extends 'base.html' %}
-{% block title %}Coach Database — {{ club_name }}{% endblock %}
+{% block title %}Coach Database — {{ app_title }}{% endblock %}
 {% block content %}
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <h5 class="mb-0 fw-bold">Coach Database</h5>
   <div class="d-flex gap-2">
+    {% if coach_tracking_mode == 'advanced' %}
     <a href="/coach-payments" class="btn btn-outline-primary btn-sm">Coach Payments →</a>
+    {% endif %}
     <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addCoachModal">
       + Add Coach
     </button>
@@ -27,6 +29,7 @@
             {% if c.email %}
             <div class="small text-muted">{{ c.email }}</div>
             {% endif %}
+            {% if coach_tracking_mode == 'advanced' %}
             <div class="small mt-1">
               {% if c.is_volunteer %}
               <span class="badge bg-light text-muted border">Volunteer (unpaid)</span>
@@ -36,6 +39,7 @@
               </span>
               {% endif %}
             </div>
+            {% endif %}
             {% if c.notes %}
             <div class="small text-muted fst-italic mt-1">{{ c.notes }}</div>
             {% endif %}
@@ -89,6 +93,7 @@
               <label class="form-label fw-semibold">Email</label>
               <input type="email" name="email" class="form-control" value="{{ c.email or '' }}">
             </div>
+            {% if coach_tracking_mode == 'advanced' %}
             <div class="row g-2 mb-2">
               <div class="col-6">
                 <label class="form-label fw-semibold">Pay rate ($)</label>
@@ -107,6 +112,7 @@
               Rate 0 = volunteer (shown on sessions, never payable). Changing the rate
               only affects sessions marked from now on.
             </div>
+            {% endif %}
             <div class="mb-3">
               <label class="form-label fw-semibold">Notes</label>
               <input type="text" name="notes" class="form-control" maxlength="200"
@@ -150,6 +156,7 @@
             <label class="form-label fw-semibold">Email</label>
             <input type="email" name="email" class="form-control">
           </div>
+          {% if coach_tracking_mode == 'advanced' %}
           <div class="row g-2 mb-2">
             <div class="col-6">
               <label class="form-label fw-semibold">Pay rate ($)</label>
@@ -164,6 +171,7 @@
             </div>
           </div>
           <div class="text-muted small mb-2">Rate 0 = volunteer (shown on sessions, never payable).</div>
+          {% endif %}
           <div class="mb-3">
             <label class="form-label fw-semibold">Notes</label>
             <input type="text" name="notes" class="form-control" maxlength="200"

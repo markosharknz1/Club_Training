@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Register — {{ tmpl.name }} — {{ club_name }}{% endblock %}
+{% block title %}Register — {{ tmpl.name }} — {{ app_title }}{% endblock %}
 {% block content %}
 
 {# ── Page header ───────────────────────────────────────────────────── #}
@@ -63,6 +63,7 @@
   </div>
 
   {# Coaches #}
+  {% if coach_tracking_mode != 'off' %}
   <div class="card shadow-sm border-0 mb-3">
     <div class="card-header fw-semibold">Coaches Present</div>
     <div class="card-body p-3">
@@ -81,6 +82,7 @@
       </form>
     </div>
   </div>
+  {% endif %}
 
 </div>
 

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Check In — {{ d.strftime('%a %d %b') }} — {{ club_name }}{% endblock %}
+{% block title %}Check In — {{ d.strftime('%a %d %b') }} — {{ app_title }}{% endblock %}
 {% block content %}
 
 {# ── Header ───────────────────────────────────────────────────────── #}
@@ -173,10 +173,12 @@
             <label class="form-label fw-semibold" id="edit-guardian-phone-label">Guardian phone</label>
             <input type="text" id="edit-guardian-phone" class="form-control" autocomplete="off">
           </div>
+          {% if email_fields_enabled %}
           <div class="mb-3">
             <label class="form-label fw-semibold" id="edit-guardian-email-label">Guardian email</label>
             <input type="email" id="edit-guardian-email" class="form-control" autocomplete="off">
           </div>
+          {% endif %}
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Notes</label>
@@ -955,7 +957,8 @@ function showPlayerInfo(e, row) {
       document.getElementById('edit-own-email').value      = p.own_email;
       document.getElementById('edit-guardian-name').value  = p.guardian_name;
       document.getElementById('edit-guardian-phone').value = p.guardian_phone;
-      document.getElementById('edit-guardian-email').value = p.guardian_email;
+      const gEmail = document.getElementById('edit-guardian-email');
+      if (gEmail) gEmail.value = p.guardian_email;
       document.getElementById('edit-notes').value          = p.notes;
       document.getElementById('edit-player-error').classList.add('d-none');
       bootstrap.Modal.getOrCreateInstance(document.getElementById('editPlayerModal')).show();
@@ -970,19 +973,27 @@ function confirmEditPlayer() {
   fetch('/api/player/' + pid, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      name:           document.getElementById('edit-name').value.trim(),
-      category:       document.getElementById('edit-category').value,
-      dob:            dob,
-      age:            dob ? null : age,
-      address:        document.getElementById('edit-address').value.trim(),
-      own_phone:      document.getElementById('edit-own-phone').value.trim(),
-      own_email:      document.getElementById('edit-own-email').value.trim(),
-      guardian_name:  document.getElementById('edit-guardian-name').value.trim(),
-      guardian_phone: document.getElementById('edit-guardian-phone').value.trim(),
-      guardian_email: document.getElementById('edit-guardian-email').value.trim(),
-      notes:          document.getElementById('edit-notes').value.trim(),
-    }),
+    body: JSON.stringify((() => {
+      const payload = {
+        name:           document.getElementById('edit-name').value.trim(),
+        category:       document.getElementById('edit-category').value,
+        dob:            dob,
+        age:            dob ? null : age,
+        address:        document.getElementById('edit-address').value.trim(),
+        own_phone:      document.getElementById('edit-own-phone').value.trim(),
+        guardian_name:  document.getElementById('edit-guardian-name').value.trim(),
+        guardian_phone: document.getElementById('edit-guardian-phone').value.trim(),
+        notes:          document.getElementById('edit-notes').value.trim(),
+      };
+      // Omit email keys entirely when the fields are hidden, so the server
+      // keeps stored addresses untouched.
+      {% if email_fields_enabled %}
+      payload.own_email      = document.getElementById('edit-own-email').value.trim();
+      const gE = document.getElementById('edit-guardian-email');
+      if (gE) payload.guardian_email = gE.value.trim();
+      {% endif %}
+      return payload;
+    })()),
   }).then(r => r.json()).then(data => {
     if (!data.ok) {
       errEl.textContent = data.error;

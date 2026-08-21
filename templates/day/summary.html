@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Day Summary — {{ d.strftime('%a %d %b') }} — {{ club_name }}{% endblock %}
+{% block title %}Day Summary — {{ d.strftime('%a %d %b') }} — {{ app_title }}{% endblock %}
 {% block content %}
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2 d-print-none">
@@ -117,6 +117,7 @@
 </div>
 
 {# ── Coaches ──────────────────────────────────────────────────────── #}
+{% if coach_tracking_mode != 'off' %}
 <div class="card shadow-sm border-0 mb-4" style="max-width:640px">
   <div class="card-header fw-semibold">Coaches</div>
   {% if coach_map %}
@@ -148,6 +149,7 @@
   </div>
   {% endif %}
 </div>
+{% endif %}{# coach_tracking_mode != 'off' #}
 
 {% endif %}
 

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}{{ player.name }} — {{ club_name }}{% endblock %}
+{% block title %}{{ player.name }} — {{ app_title }}{% endblock %}
 {% block content %}
 
 {% set cfg = field_cfg.junior if player.category == 'Junior' else field_cfg.senior %}
@@ -99,12 +99,14 @@
               <a href="tel:{{ player.guardian_phone }}">{{ player.guardian_phone }}</a>
             {% else %}—{% endif %}
           </dd>
+          {% if email_fields_enabled %}
           <dt class="col-5 text-muted">Email</dt>
           <dd class="col-7">
             {% if player.guardian_email %}
               <a href="mailto:{{ player.guardian_email }}">{{ player.guardian_email }}</a>
             {% else %}—{% endif %}
           </dd>
+          {% endif %}
         </dl>
       </div>
     </div>

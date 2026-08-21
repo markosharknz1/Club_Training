@@ -125,6 +125,9 @@ class CoachAttendance(db.Model):
     adjustment        = db.Column(db.Numeric(8, 2), nullable=False, default=0)  # manual +/- (travel, cover…)
     adjustment_reason = db.Column(db.String(200))
     marked_at         = db.Column(db.DateTime, default=datetime.utcnow)
+    paid              = db.Column(db.Boolean, nullable=False, default=False)
+    paid_date         = db.Column(db.Date)
+    payment_reference = db.Column(db.String(100))   # e.g. bank transfer ref
 
     coach        = db.relationship('Coach')
     session_date = db.relationship('SessionDate', backref='coach_attendance')

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Coach Payments — {{ club_name }}{% endblock %}
+{% block title %}Coach Payments — {{ app_title }}{% endblock %}
 {% block content %}
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -42,6 +42,7 @@
           <th class="text-end">Gross</th>
           <th class="text-end">Adjustments</th>
           <th class="text-end">Net Pay</th>
+          <th class="text-center">Paid</th>
           <th></th>
         </tr>
       </thead>
@@ -56,6 +57,28 @@
             {%- if e.adjust %}{{ '−' if e.adjust < 0 }}${{ e.adjust|abs|round|int }}{% else %}—{% endif -%}
           </td>
           <td class="text-end fw-bold coach-net" data-coach="{{ e.coach.id }}">${{ e.net|round|int }}</td>
+          <td class="text-center">
+            {% if e.all_paid and e.rows %}
+            <span class="badge bg-success">Paid{% if e.paid_date %} {{ e.paid_date.strftime('%d %b') }}{% endif %}</span>
+            {% if e.paid_ref %}<div class="text-muted" style="font-size:.65rem">{{ e.paid_ref }}</div>{% endif %}
+            <form method="post" action="/coach-payments/mark-paid" class="d-inline"
+                  onsubmit="return confirm('Mark {{ e.coach.name }} — {{ month_label }} as UNPAID again?')">
+              <input type="hidden" name="month" value="{{ month_key }}">
+              <input type="hidden" name="coach_id" value="{{ e.coach.id }}">
+              <input type="hidden" name="unmark" value="1">
+              <button class="btn btn-link btn-sm p-0 text-muted" style="font-size:.65rem">undo</button>
+            </form>
+            {% else %}
+            <form method="post" action="/coach-payments/mark-paid" class="d-flex gap-1 justify-content-center"
+                  onsubmit="return confirm('Mark {{ e.coach.name }} — {{ month_label }} (${{ e.net|round|int }}) as paid?')">
+              <input type="hidden" name="month" value="{{ month_key }}">
+              <input type="hidden" name="coach_id" value="{{ e.coach.id }}">
+              <input type="text" name="reference" class="form-control form-control-sm"
+                     style="width:7rem" placeholder="ref (optional)" maxlength="100">
+              <button class="btn btn-outline-success btn-sm text-nowrap">Mark paid</button>
+            </form>
+            {% endif %}
+          </td>
           <td class="text-end">
             <button class="btn btn-outline-secondary btn-sm py-0 px-2" data-bs-toggle="collapse"
                     data-bs-target="#detail{{ e.coach.id }}">Detail</button>
@@ -73,6 +96,7 @@
           <td class="text-end">—</td>
           <td class="text-end">$0</td>
           <td></td>
+          <td></td>
         </tr>
         {% endfor %}
       </tbody>
@@ -86,6 +110,7 @@
             {%- if totals.adjust %}{{ '−' if totals.adjust < 0 }}${{ totals.adjust|abs|round|int }}{% else %}—{% endif -%}
           </td>
           <td class="text-end" id="grandNet">${{ totals.net|round|int }}</td>
+          <td></td>
           <td></td>
         </tr>
       </tfoot>

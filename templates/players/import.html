@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Import Players — {{ club_name }}{% endblock %}
+{% block title %}Import Players — {{ app_title }}{% endblock %}
 {% block content %}
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -19,8 +19,11 @@
         either a single <code>name</code> column or separate <code>Given</code> +
         <code>Surname</code> columns; plus optional <code>SV</code> (Y = sports voucher user,
         saved to notes), <code>age</code>, <code>category</code> (Junior/Senior, defaults to
-        Junior), <code>address</code>, <code>own_email</code>, <code>own_phone</code>,
-        <code>guardian_name</code>, <code>guardian_phone</code>, <code>guardian_email</code>.
+        Junior), <code>address</code>, <code>own_phone</code>,
+        <code>guardian_name</code>, <code>guardian_phone</code>{% if email_fields_enabled %},
+        <code>own_email</code>, <code>guardian_email</code>{% endif %}.
+        {% if not email_fields_enabled %}Email columns are ignored because email fields are
+        turned off in Club Settings → Email.{% endif %}
         Only the name is required. Marker characters like <code>^</code> in names are stripped.
         Names already in the database are skipped, so re-importing is safe.
       </p>

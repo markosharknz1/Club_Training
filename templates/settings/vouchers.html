@@ -1,0 +1,43 @@
+{% extends 'settings/_layout.html' %}
+{% block section_content %}
+
+<div class="card shadow-sm border-0" style="max-width:560px">
+  <div class="card-header fw-semibold">Voucher Rules</div>
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Defaults for new vouchers and the limits enforced when registering one. The defaults
+      match the SA Sports Voucher program ($100, 10 sessions, 2 per child per calendar year).
+      Changing these never touches vouchers already registered.
+    </p>
+    <form method="post" action="/settings/vouchers">
+      <div class="row g-3 mb-3">
+        <div class="col-6">
+          <label class="form-label fw-semibold">Voucher value ($)</label>
+          <input type="number" name="voucher_amount" class="form-control" min="1" step="1"
+                 value="{{ vd.amount }}">
+        </div>
+        <div class="col-6">
+          <label class="form-label fw-semibold">Sessions per voucher</label>
+          <input type="number" name="voucher_sessions" class="form-control" min="1" step="1"
+                 value="{{ vd.sessions }}">
+        </div>
+        <div class="col-6">
+          <label class="form-label fw-semibold">Max active at once</label>
+          <input type="number" name="voucher_max_active" class="form-control" min="1" step="1"
+                 value="{{ vd.max_active }}">
+          <div class="form-text">A child can't register another voucher while they have this
+            many with sessions remaining.</div>
+        </div>
+        <div class="col-6">
+          <label class="form-label fw-semibold">Max per calendar year</label>
+          <input type="number" name="voucher_max_per_year" class="form-control" min="1" step="1"
+                 value="{{ vd.max_per_year }}">
+          <div class="form-text">Unused sessions still carry over to the next year.</div>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary">Save</button>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
