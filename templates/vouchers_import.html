@@ -37,6 +37,15 @@
       <pre class="bg-light p-2 rounded small mb-3">name,voucher_number,date_issued
 Alex Smith,AK-2026-0012345,01/08/2026
 Sam Lee,AK-2026-0067890,</pre>
+      <div class="form-check mb-3">
+        <input class="form-check-input" type="checkbox" name="replace_imported" value="1" id="replace-imported">
+        <label class="form-check-label" for="replace-imported">
+          Replace previously imported balances
+        </label>
+        <div class="form-text">Tick when re-importing a newer balance sheet. Removes vouchers
+          that came from an earlier import <em>and</em> have no check-ins recorded in the app;
+          any voucher already used at a session is kept.</div>
+      </div>
       <button type="submit" class="btn btn-success">Import</button>
     </form>
   </div>

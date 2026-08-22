@@ -21,7 +21,7 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
 
-APP_VERSION = '1.5.1'
+APP_VERSION = '1.5.2'
 
 # ─── Branding ───────────────────────────────────────────────────────
 # Bundled club icons (static/icons/sports/<key>.svg — see LICENSE.md there).
@@ -1550,6 +1550,18 @@ def create_app():
                 flash('That file appears to be empty.', 'danger')
                 return redirect(url_for('vouchers_import'))
 
+            # Optional: a fresh balance sheet supersedes earlier imported
+            # balances. Only vouchers that came from an import AND have no
+            # check-ins recorded in the app are removed — anything used at a
+            # session stays.
+            replaced = 0
+            if request.form.get('replace_imported'):
+                for v in Voucher.query.filter(Voucher.notes.like('Imported balance%')).all():
+                    if not v.attendance_records:
+                        db.session.delete(v)
+                        replaced += 1
+                db.session.flush()
+
             field_map = {
                 'name':           {'name', 'player', 'player name', 'child', 'child name', 'full name'},
                 'voucher_number': {'voucher number', 'voucher no', 'voucher', 'number', 'voucher id', 'voucher code', 'code'},
@@ -1692,6 +1704,8 @@ def create_app():
 
             db.session.commit()
             msg = f'{added} voucher{"s" if added != 1 else ""} imported.'
+            if replaced:
+                msg += f' {replaced} previously imported balance{"s" if replaced != 1 else ""} replaced.'
             if fuzzy_notes:
                 msg += (f' {len(fuzzy_notes)} matched by name similarity — please check: '
                         + '; '.join(fuzzy_notes) + '.')
