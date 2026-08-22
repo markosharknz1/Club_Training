@@ -274,6 +274,10 @@ class Voucher(db.Model):
     voucher_number = db.Column(db.String(50))
     amount         = db.Column(db.Numeric(8, 2), nullable=False, default=DEFAULT_VOUCHER_AMOUNT)
     sessions_total = db.Column(db.Integer, nullable=False, default=DEFAULT_VOUCHER_SESSIONS)
+    # Sessions used that have NO attendance row in this app: carryover balances
+    # imported from the old spreadsheet, plus check-ins folded in when old
+    # calendar days are purged. sessions_used = this + live attendance rows.
+    sessions_used_before = db.Column(db.Integer, nullable=False, default=0)
     date_issued    = db.Column(db.Date, nullable=False, default=date_t.today)
     notes          = db.Column(db.String(200))
     created_at     = db.Column(db.DateTime, default=datetime.utcnow)
@@ -282,7 +286,7 @@ class Voucher(db.Model):
 
     @property
     def sessions_used(self):
-        return len(self.attendance_records)
+        return (self.sessions_used_before or 0) + len(self.attendance_records)
 
     @property
     def sessions_remaining(self):

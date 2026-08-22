@@ -539,6 +539,23 @@ own machine and demo to other club members (e.g. "Carol").
     columns (monthly export Session Summary sheet + reports Monthly Attendance sheet).
     The register "Check in all" bulk path auto-flags first-timers too.
 
+36. **Voucher carryover representation fix + "Clear Old Calendar Entries"** (user: "imported
+    are showing 0 sessions used, not 4/10" and "need a way to clear all of the old calendar
+    entries"). Root cause: the carryover import stored REMAINING as `sessions_total` (4 left →
+    a 4-session $40 voucher → "0/4 used"). Fix: `Voucher.sessions_used_before` (add-only
+    migration; sessions with no attendance row in this app) and `sessions_used` = that +
+    live attendance rows. One-time repair runs when the column is added: every voucher whose
+    notes start "Imported balance" becomes standard-size (`ceil(remaining/10)*10` sessions,
+    $10/session → 4 left = 10 total / 6 used; 12 left = 20 total / 8 used); verified total
+    remaining across all 30 live vouchers unchanged (226). The import path now writes the
+    same shape. **Purge tool** (Settings → Data & Backup, `POST /settings/data/purge-sessions`,
+    requires typing DELETE + JS confirm, refuses future cut-offs): deletes every SessionDate
+    before a date (attendance via cascade, CoachAttendance explicitly) and FOLDS voucher
+    check-ins into `sessions_used_before` so balances never change. Players/vouchers/coaches
+    untouched. NOTE: the dev DB in C:\Club_Training has zero session_dates — the user's live
+    data lives in their unzipped release folder, so diagnose from descriptions/screenshots,
+    not the dev copy.
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

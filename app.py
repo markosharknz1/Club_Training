@@ -21,7 +21,7 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
 
-APP_VERSION = '1.5.0'
+APP_VERSION = '1.5.1'
 
 # ─── Branding ───────────────────────────────────────────────────────
 # Bundled club icons (static/icons/sports/<key>.svg — see LICENSE.md there).
@@ -205,6 +205,23 @@ def create_app():
         voucher_cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(vouchers)")).fetchall()]
         if voucher_cols and 'voucher_number' not in voucher_cols:
             db.session.execute(db.text("ALTER TABLE vouchers ADD COLUMN voucher_number VARCHAR(50)"))
+            db.session.commit()
+        if voucher_cols and 'sessions_used_before' not in voucher_cols:
+            db.session.execute(db.text(
+                "ALTER TABLE vouchers ADD COLUMN sessions_used_before INTEGER NOT NULL DEFAULT 0"))
+            db.session.commit()
+            # One-time repair of carryover-balance imports, which stored the
+            # REMAINING count as the voucher's total (so "4 left" showed as
+            # "0/4 used"). Convert to standard-size vouchers with the used
+            # portion recorded in sessions_used_before → "6/10 used, 4 left".
+            vd_std = _voucher_defaults()
+            std_sessions, std_amount = vd_std['sessions'], vd_std['amount']
+            for v in Voucher.query.filter(Voucher.notes.like('Imported balance%')).all():
+                remaining = int(v.sessions_total or 0)
+                total = max(std_sessions, -(-remaining // std_sessions) * std_sessions)
+                v.sessions_used_before = total - remaining
+                v.sessions_total = total
+                v.amount = round(total * std_amount / std_sessions)
             db.session.commit()
 
     # ── Auto-close stale sessions ─────────────────────────────────────
@@ -1641,11 +1658,15 @@ def create_app():
                     except ValueError:
                         pass
 
+                used_before = 0
                 if remaining is not None:
-                    # Carryover balance: the voucher enters the app with exactly
-                    # this many sessions left on it.
-                    sessions = remaining
-                    amount   = int(round(remaining * per_session))
+                    # Carryover balance: a standard-size voucher (or a multiple,
+                    # if more than one voucher's worth is left) with the already-
+                    # used portion recorded, so the page reads "6/10 used, 4 left".
+                    std = vd_['sessions']
+                    sessions    = max(std, -(-remaining // std) * std)
+                    used_before = sessions - remaining
+                    amount      = int(round(sessions * per_session))
                     notes    = cell(row, 'notes') or f'Imported balance — {remaining} sessions remaining'
                 else:
                     try:
@@ -1661,6 +1682,7 @@ def create_app():
                 db.session.add(Voucher(
                     player_id=player.id, voucher_number=vnum,
                     amount=amount, sessions_total=sessions,
+                    sessions_used_before=used_before,
                     date_issued=issued, notes=notes,
                 ))
                 db.session.flush()   # so the limit check sees this voucher for repeat names
@@ -2108,6 +2130,12 @@ def create_app():
                 email_from=Setting.get('email_from', ''),
                 email_from_name=Setting.get('email_from_name', ''),
                 smtp_password_set=bool(Setting.get('smtp_password', '')))
+        elif section == 'data':
+            past = (SessionDate.query.filter(SessionDate.date < date.today())
+                    .order_by(SessionDate.date).all())
+            ctx.update(past_count=len(past),
+                       oldest_date=past[0].date if past else None,
+                       newest_past_date=past[-1].date if past else None)
         elif section == 'about':
             ctx.update(app_version=APP_VERSION)
         return render_template(f'settings/{section}.html', **ctx)
@@ -2225,6 +2253,48 @@ def create_app():
         else:
             flash(f'Test email failed: {failures[0] if failures else "unknown error"}', 'danger')
         return redirect(url_for('settings_section', section='email'))
+
+    @app.route('/settings/data/purge-sessions', methods=['POST'])
+    def settings_purge_sessions():
+        """Delete every calendar entry (session occurrence) before a date,
+        with its attendance and coach markings. Voucher check-ins among them
+        are folded into each voucher's sessions_used_before so balances do
+        NOT change. Requires typing DELETE."""
+        if request.form.get('confirm_text', '').strip().upper() != 'DELETE':
+            flash('Type DELETE in the confirmation box to purge old sessions.', 'warning')
+            return redirect(url_for('settings_section', section='data'))
+        try:
+            cutoff = date.fromisoformat(request.form.get('before_date', ''))
+        except ValueError:
+            flash('Pick a valid cut-off date.', 'warning')
+            return redirect(url_for('settings_section', section='data'))
+        if cutoff > date.today():
+            flash('The cut-off date cannot be in the future — today and future '
+                  'sessions are never purged.', 'warning')
+            return redirect(url_for('settings_section', section='data'))
+
+        sds = SessionDate.query.filter(SessionDate.date < cutoff).all()
+        n_sessions = len(sds)
+        n_att = n_voucher = 0
+        for sd in sds:
+            for a in list(sd.attendance):
+                if a.voucher_id:
+                    v = db.session.get(Voucher, a.voucher_id)
+                    if v:
+                        v.sessions_used_before = (v.sessions_used_before or 0) + 1
+                        n_voucher += 1
+                n_att += 1
+            CoachAttendance.query.filter_by(session_date_id=sd.id).delete()
+            db.session.delete(sd)      # cascades to its attendance rows
+        db.session.commit()
+        if n_sessions:
+            flash(f'Deleted {n_sessions} session{"s" if n_sessions != 1 else ""} before '
+                  f'{cutoff.strftime("%d %b %Y")} ({n_att} check-ins). '
+                  f'{n_voucher} voucher check-in{"s" if n_voucher != 1 else ""} '
+                  'folded into voucher balances — no balances changed.', 'success')
+        else:
+            flash(f'No sessions found before {cutoff.strftime("%d %b %Y")}.', 'info')
+        return redirect(url_for('settings_section', section='data'))
 
     @app.route('/settings/coaches/backfill', methods=['POST'])
     def settings_coaches_backfill():

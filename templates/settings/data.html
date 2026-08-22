@@ -32,6 +32,45 @@
   </div>
 </div>
 
+<div class="card shadow-sm border-0 mt-4 border-danger" style="max-width:560px">
+  <div class="card-header fw-semibold text-danger">Clear Old Calendar Entries</div>
+  <div class="card-body">
+    {% if past_count %}
+    <p class="small mb-2">
+      There {{ 'is' if past_count == 1 else 'are' }} <strong>{{ past_count }}</strong> past
+      session{{ 's' if past_count != 1 }} on the calendar, from
+      <strong>{{ oldest_date.strftime('%d %b %Y') }}</strong> to
+      <strong>{{ newest_past_date.strftime('%d %b %Y') }}</strong>.
+    </p>
+    {% else %}
+    <p class="small mb-2">There are no past sessions on the calendar.</p>
+    {% endif %}
+    <p class="text-muted small mb-3">
+      Deletes every session <em>before</em> the date you choose, along with its check-ins and
+      coach markings. Today and future sessions are never touched.
+      <strong>Voucher balances are preserved</strong> — voucher check-ins on deleted days are
+      folded into each voucher's used count. Player records, vouchers and coaches are kept.
+      This cannot be undone (a daily backup is taken at each start-up).
+    </p>
+    <form method="post" action="/settings/data/purge-sessions" class="row g-2 align-items-end"
+          onsubmit="return confirm('Delete ALL sessions before the chosen date? This cannot be undone.')">
+      <div class="col-auto">
+        <label class="form-label small fw-semibold mb-1">Delete sessions before</label>
+        <input type="date" name="before_date" class="form-control form-control-sm" required
+               max="{{ today.isoformat() }}" value="{{ today.isoformat() }}">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small fw-semibold mb-1">Type DELETE to confirm</label>
+        <input type="text" name="confirm_text" class="form-control form-control-sm"
+               style="width:8rem" autocomplete="off" placeholder="DELETE" required>
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-outline-danger btn-sm">Delete old sessions</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="card shadow-sm border-0 mt-4" style="max-width:560px">
   <div class="card-header fw-semibold">Testing Mode</div>
   <div class="card-body">
