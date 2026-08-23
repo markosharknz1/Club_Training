@@ -21,7 +21,7 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
 
-APP_VERSION = '1.6.0'
+APP_VERSION = '1.6.1'
 
 # ─── Branding ───────────────────────────────────────────────────────
 # Bundled club icons (static/icons/sports/<key>.svg — see LICENSE.md there).
@@ -1699,11 +1699,17 @@ def create_app():
             # check-ins recorded in the app are removed — anything used at a
             # session stays.
             replaced = 0
+            orphaned = {}          # player_id -> check-ins from replaced vouchers
             if request.form.get('replace_imported'):
                 for v in Voucher.query.filter(Voucher.notes.like('Imported balance%')).all():
-                    if not v.attendance_records:
-                        db.session.delete(v)
-                        replaced += 1
+                    # Check-ins made in the app since the earlier import are
+                    # real usage the new sheet doesn't know about — detach them
+                    # and re-attach to the child's fresh voucher afterwards.
+                    for a in list(v.attendance_records):
+                        orphaned.setdefault(v.player_id, []).append(a)
+                        a.voucher_id = None
+                    db.session.delete(v)
+                    replaced += 1
                 db.session.flush()
 
             field_map = {
@@ -1855,10 +1861,44 @@ def create_app():
                     existing_numbers.add(vnum.lower())
                 added += 1
 
+            # Re-attach check-ins from replaced vouchers to each child's fresh
+            # voucher (oldest one with sessions left; else a new standard one so
+            # no usage is ever lost).
+            reattached, recreated = 0, []
+            def _live_remaining(v):
+                # relationship caches can lag mid-transaction — count directly
+                return (v.sessions_total - (v.sessions_used_before or 0) - len(v.manual_uses)
+                        - Attendance.query.filter_by(voucher_id=v.id).count())
+            for pid, atts in orphaned.items():
+                db.session.flush()
+                cands = (Voucher.query.filter_by(player_id=pid)
+                         .order_by(Voucher.date_issued, Voucher.id).all())
+                for a in atts:
+                    target = next((v for v in cands if _live_remaining(v) > 0), None)
+                    if target is None:
+                        p = db.session.get(Player, pid)
+                        vd0 = _voucher_defaults()
+                        target = Voucher(player_id=pid, amount=vd0['amount'],
+                                         sessions_total=vd0['sessions'],
+                                         date_issued=date.today(),
+                                         notes='Created on re-import to hold existing check-ins')
+                        db.session.add(target); db.session.flush()
+                        cands.append(target)
+                        recreated.append(p.name if p else str(pid))
+                    a.voucher_id = target.id
+                    db.session.flush()
+                    reattached += 1
+
             db.session.commit()
             msg = f'{added} voucher{"s" if added != 1 else ""} imported.'
             if replaced:
                 msg += f' {replaced} previously imported balance{"s" if replaced != 1 else ""} replaced.'
+            if reattached:
+                msg += (f' {reattached} check-in{"s" if reattached != 1 else ""} made since the '
+                        'earlier import moved onto the new vouchers.')
+            if recreated:
+                msg += (' New vouchers had to be created to hold existing check-ins for: '
+                        + ', '.join(sorted(set(recreated))) + ' (not on the sheet) — please check.')
             if fuzzy_notes:
                 msg += (f' {len(fuzzy_notes)} matched by name similarity — please check: '
                         + '; '.join(fuzzy_notes) + '.')

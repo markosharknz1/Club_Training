@@ -581,6 +581,13 @@ own machine and demo to other club members (e.g. "Carol").
     manual uses too ("Date unknown" rows last). Converter script for the user's
     `sports-vouchers.xlsx` lives only in the session scratchpad (real kids' data — never in
     the repo); output `sports-vouchers-import.xlsx` in the user's Downloads.
+    **Re-import after real use** (v1.6.1): "Replace previously imported balances" now replaces
+    ALL imported vouchers, detaching any check-ins made since the earlier import and
+    re-attaching them to the child's fresh voucher (oldest with sessions left — counted via a
+    direct query, not the cached relationship); a child with check-ins but no row on the new
+    sheet gets a holding voucher (flagged in the report). No check-in ever loses its voucher.
+    Known limitation: if a check-in in the app is ALSO ticked on the paper sheet it double
+    counts — fix by removing the extra use in the Edit dialog.
 
 ## Known open items (not yet built — need user input before building)
 
