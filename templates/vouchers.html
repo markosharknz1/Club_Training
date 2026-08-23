@@ -27,6 +27,24 @@
       {% endfor %}
     </select>
   </div>
+  <div class="col-auto">
+    <div class="form-check form-switch mb-1">
+      <input class="form-check-input" type="checkbox" role="switch" name="show_hidden" value="1"
+             id="show-hidden" {% if show_hidden %}checked{% endif %} onchange="this.form.submit()">
+      <label class="form-check-label small" for="show-hidden">
+        Show hidden{% if hidden_count %} ({{ hidden_count }}){% endif %}</label>
+    </div>
+  </div>
+  <div class="col-auto ms-auto">
+    <button type="submit" form="hideUsedForm" class="btn btn-outline-secondary btn-sm">
+      Hide all used-up vouchers</button>
+  </div>
+</form>
+<form method="post" action="/vouchers" id="hideUsedForm" class="d-none"
+      onsubmit="return confirm('Hide every voucher with 0 sessions left? They stay on record and can be shown again.')">
+  <input type="hidden" name="action" value="hide_used">
+  <input type="hidden" name="year" value="{{ year }}">
+  <input type="hidden" name="show_hidden" value="{{ '1' if show_hidden else '' }}">
 </form>
 
 {% if voucher_list %}
@@ -47,9 +65,18 @@
       </thead>
       <tbody>
         {% for v in voucher_list %}
-        <tr>
-          <td class="fw-semibold">{{ v.player.name }}</td>
-          <td class="text-muted">{{ v.voucher_number or '—' }}</td>
+        <tr {% if v.hidden %}class="text-muted" style="opacity:.6"{% endif %}>
+          <td class="fw-semibold">{{ v.player.name }}
+            {% if v.hidden %}<span class="badge bg-light text-muted border ms-1" style="font-size:.6rem">hidden</span>{% endif %}
+          </td>
+          <td class="text-muted">{{ v.voucher_number or '—' }}
+            {% if v.continues_from %}
+            <div style="font-size:.7rem">↳ continues {{ v.continues_from.label }}</div>
+            {% endif %}
+            {% if v.continued_by %}
+            <div style="font-size:.7rem">→ followed by {{ v.continued_by.label }}</div>
+            {% endif %}
+          </td>
           <td>{{ v.date_issued.strftime('%d %b %Y') }}</td>
           <td class="text-end">{{ v.amount | float | round | int }}</td>
           <td class="text-center">{{ v.sessions_used }} / {{ v.sessions_total }}</td>
@@ -58,7 +85,17 @@
           </td>
           <td class="text-muted small">{{ v.notes or '' }}</td>
           <td class="text-end text-nowrap">
+            <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2"
+                    onclick="openVoucherEdit({{ v.id }})">Edit</button>
             <a href="/vouchers/{{ v.id }}/pdf" class="btn btn-outline-secondary btn-sm py-0 px-2">↓ PDF</a>
+            <form method="post" action="/vouchers" class="d-inline">
+              <input type="hidden" name="action" value="{{ 'unhide' if v.hidden else 'hide' }}">
+              <input type="hidden" name="voucher_id" value="{{ v.id }}">
+              <input type="hidden" name="year" value="{{ year }}">
+              <input type="hidden" name="show_hidden" value="{{ '1' if show_hidden else '' }}">
+              <button type="submit" class="btn btn-outline-secondary btn-sm py-0 px-2">
+                {{ 'Unhide' if v.hidden else 'Hide' }}</button>
+            </form>
             {% if v.sessions_used == 0 %}
             <form method="post" action="/vouchers?year={{ year }}" class="d-inline"
                   onsubmit="return confirm('Delete this voucher?')">
@@ -133,5 +170,196 @@
     </div>
   </div>
 </div>
+
+{# ══ Edit Voucher modal ══════════════════════════════════════════════ #}
+<div class="modal fade" id="editVoucherModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <form method="post" action="/vouchers" id="editVoucherForm">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Voucher — <span id="ev-player"></span></h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="action" value="edit">
+          <input type="hidden" name="voucher_id" id="ev-id">
+          <input type="hidden" name="year" value="{{ year }}">
+          <input type="hidden" name="show_hidden" value="{{ '1' if show_hidden else '' }}">
+          <div class="row g-3">
+            <div class="col-md-5">
+              <div class="mb-2">
+                <label class="form-label fw-semibold">Voucher number</label>
+                <input type="text" name="voucher_number" id="ev-number" class="form-control" autocomplete="off">
+              </div>
+              <div class="row g-2 mb-2">
+                <div class="col-6">
+                  <label class="form-label fw-semibold">Amount</label>
+                  <input type="number" name="amount" id="ev-amount" class="form-control" step="1" min="0">
+                </div>
+                <div class="col-6">
+                  <label class="form-label fw-semibold">Sessions</label>
+                  <input type="number" name="sessions_total" id="ev-total" class="form-control" step="1" min="1">
+                </div>
+              </div>
+              <div class="mb-2">
+                <label class="form-label fw-semibold">Date issued</label>
+                <input type="date" name="date_issued" id="ev-issued" class="form-control">
+              </div>
+              <div class="mb-2">
+                <label class="form-label fw-semibold">Continues from</label>
+                <select name="continues_from_id" id="ev-continues" class="form-select">
+                  <option value="">— none —</option>
+                </select>
+                <div class="form-text">The earlier voucher this one follows on from.</div>
+              </div>
+              <div class="mb-2">
+                <label class="form-label fw-semibold">Notes</label>
+                <input type="text" name="notes" id="ev-notes" class="form-control" maxlength="200">
+              </div>
+              <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" name="hidden" value="1" id="ev-hidden">
+                <label class="form-check-label" for="ev-hidden">Hidden (tidy away — stays on record)</label>
+              </div>
+            </div>
+            <div class="col-md-7">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="fw-semibold">Sessions used</span>
+                <span class="text-muted small" id="ev-summary"></span>
+              </div>
+              <div class="form-text mb-2">Check-ins come from the calendar. Manual entries can be
+                dated, re-dated or removed here — these changes save instantly.</div>
+              <table class="table table-sm align-middle mb-2" style="font-size:.85rem">
+                <tbody id="ev-uses"></tbody>
+              </table>
+              <div class="d-flex gap-2 align-items-center">
+                <input type="date" id="ev-new-date" class="form-control form-control-sm" style="width:10rem">
+                <input type="text" id="ev-new-note" class="form-control form-control-sm" placeholder="note (optional)">
+                <button type="button" class="btn btn-outline-success btn-sm text-nowrap" onclick="addUse()">+ Add used date</button>
+              </div>
+              <div class="text-danger small mt-1 d-none" id="ev-error"></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="submit" class="btn btn-primary">Save details</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+let evId = null;
+let evDirtyUses = false;
+
+function openVoucherEdit(id) {
+  fetch('/api/voucher/' + id).then(r => r.json()).then(data => {
+    if (!data.ok) return;
+    evDirtyUses = false;
+    fillVoucherModal(data.voucher);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('editVoucherModal')).show();
+  });
+}
+
+function fillVoucherModal(v) {
+  evId = v.id;
+  document.getElementById('ev-id').value      = v.id;
+  document.getElementById('ev-player').textContent = v.player;
+  document.getElementById('ev-number').value  = v.voucher_number;
+  document.getElementById('ev-amount').value  = v.amount;
+  document.getElementById('ev-total').value   = v.sessions_total;
+  document.getElementById('ev-issued').value  = v.date_issued;
+  document.getElementById('ev-notes').value   = v.notes;
+  document.getElementById('ev-hidden').checked = v.hidden;
+  const sel = document.getElementById('ev-continues');
+  sel.innerHTML = '<option value="">— none —</option>';
+  v.other_vouchers.forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o.id;
+    opt.textContent = o.label + ' (' + o.used + '/' + o.total + ' used)';
+    if (o.id === v.continues_from_id) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  renderUses(v);
+}
+
+function renderUses(v) {
+  document.getElementById('ev-summary').textContent =
+    v.sessions_used + ' / ' + v.sessions_total + ' used · ' + v.sessions_remaining + ' left' +
+    (v.continued_by ? ' · followed by ' + v.continued_by : '');
+  const tb = document.getElementById('ev-uses');
+  tb.innerHTML = '';
+  if (!v.uses.length) {
+    tb.innerHTML = '<tr><td class="text-muted fst-italic">No sessions used yet.</td></tr>';
+  }
+  v.uses.forEach((u, i) => {
+    const tr = document.createElement('tr');
+    if (u.kind === 'checkin') {
+      tr.innerHTML = '<td class="text-muted" style="width:2rem">' + (i + 1) + '</td>' +
+        '<td style="width:10rem">' + u.date + '</td>' +
+        '<td class="text-muted">' + escapeHtml(u.label) + '</td><td></td>';
+    } else {
+      tr.innerHTML = '<td class="text-muted" style="width:2rem">' + (i + 1) + '</td>' +
+        '<td style="width:10rem"><input type="date" class="form-control form-control-sm use-date" value="' + u.date + '"></td>' +
+        '<td><input type="text" class="form-control form-control-sm use-note" value="' + escapeHtml(u.note) + '" placeholder="note"></td>' +
+        '<td class="text-end"><button type="button" class="btn btn-link btn-sm text-danger p-0" title="Remove">✕</button></td>';
+      tr.querySelector('.use-date').addEventListener('change', e => saveUse(u.id, {date: e.target.value}));
+      tr.querySelector('.use-note').addEventListener('change', e => saveUse(u.id, {note: e.target.value}));
+      tr.querySelector('button').addEventListener('click', () => {
+        if (confirm('Remove this used session? The voucher will have one more session left.')) deleteUse(u.id);
+      });
+    }
+    tb.appendChild(tr);
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function showEvError(msg) {
+  const el = document.getElementById('ev-error');
+  el.textContent = msg; el.classList.remove('d-none');
+  setTimeout(() => el.classList.add('d-none'), 4000);
+}
+
+function handleUseResponse(r) {
+  return r.json().then(data => {
+    if (!data.ok) { showEvError(data.error || 'Could not save.'); return; }
+    evDirtyUses = true;
+    renderUses(data.voucher);
+  });
+}
+
+function addUse() {
+  const date = document.getElementById('ev-new-date').value;
+  const note = document.getElementById('ev-new-note').value.trim();
+  fetch('/api/voucher/' + evId + '/use', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({date: date, note: note}),
+  }).then(handleUseResponse).then(() => {
+    document.getElementById('ev-new-date').value = '';
+    document.getElementById('ev-new-note').value = '';
+  });
+}
+
+function saveUse(useId, payload) {
+  fetch('/api/voucher/' + evId + '/use/' + useId, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  }).then(handleUseResponse);
+}
+
+function deleteUse(useId) {
+  fetch('/api/voucher/' + evId + '/use/' + useId, {method: 'DELETE'}).then(handleUseResponse);
+}
+
+// Usage edits save instantly; if any were made, refresh the table on close so
+// the used/remaining columns catch up.
+document.getElementById('editVoucherModal').addEventListener('hidden.bs.modal', () => {
+  if (evDirtyUses) window.location.reload();
+});
+</script>
 
 {% endblock %}

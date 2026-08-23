@@ -16,12 +16,12 @@ from flask import (Flask, jsonify, flash, redirect, render_template,
 import config
 from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     sibling_links, SessionDate, Attendance, Voucher,
-                    CoachAttendance,
+                    CoachAttendance, VoucherUse,
                     PAYMENT_TYPES, AMOUNT_TYPES, DAY_NAMES, PAYMENT_COLORS,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
 
-APP_VERSION = '1.5.2'
+APP_VERSION = '1.6.0'
 
 # ─── Branding ───────────────────────────────────────────────────────
 # Bundled club icons (static/icons/sports/<key>.svg — see LICENSE.md there).
@@ -206,6 +206,12 @@ def create_app():
         if voucher_cols and 'voucher_number' not in voucher_cols:
             db.session.execute(db.text("ALTER TABLE vouchers ADD COLUMN voucher_number VARCHAR(50)"))
             db.session.commit()
+        if voucher_cols and 'hidden' not in voucher_cols:
+            db.session.execute(db.text(
+                "ALTER TABLE vouchers ADD COLUMN hidden BOOLEAN NOT NULL DEFAULT 0"))
+            db.session.execute(db.text(
+                "ALTER TABLE vouchers ADD COLUMN continues_from_id INTEGER REFERENCES vouchers(id)"))
+            db.session.commit()
         if voucher_cols and 'sessions_used_before' not in voucher_cols:
             db.session.execute(db.text(
                 "ALTER TABLE vouchers ADD COLUMN sessions_used_before INTEGER NOT NULL DEFAULT 0"))
@@ -223,6 +229,14 @@ def create_app():
                 v.sessions_total = total
                 v.amount = round(total * std_amount / std_sessions)
             db.session.commit()
+        # One-time: turn legacy used-before COUNTS into editable dated
+        # VoucherUse rows (dates recovered from the import notes where the
+        # paper sheet recorded them; the rest are "date unknown").
+        for v in Voucher.query.filter(Voucher.sessions_used_before > 0).all():
+            _add_voucher_uses(v, int(v.sessions_used_before),
+                              _uses_from_notes(v.notes, v.date_issued))
+            v.sessions_used_before = 0
+        db.session.commit()
 
     # ── Auto-close stale sessions ─────────────────────────────────────
 
@@ -1118,11 +1132,6 @@ def create_app():
                     'group_name':   a.group.name if a.group else None,
                 }
 
-        # Players with NO attendance before today — the "New player" tickbox
-        # pre-ticks for them at check-in.
-        first_time_ids = [p.id for p in all_players
-                          if p.id not in last_attendance_map]
-
         # Sessions data for JS modal (no group options when groups are disabled)
         use_groups = Setting.get('groups_enabled', '1') == '1'
         sessions_js = [
@@ -1145,7 +1154,6 @@ def create_app():
                                attendance_map=attendance_map,
                                recent_ids=recent_ids,
                                last_attendance_map=last_attendance_map,
-                               first_time_ids=json.dumps(first_time_ids),
                                sessions_js=json.dumps(sessions_js),
                                PAYMENT_TYPES=PAYMENT_TYPES,
                                AMOUNT_TYPES=list(AMOUNT_TYPES),
@@ -1227,15 +1235,6 @@ def create_app():
 
         attendance_map = {a.player_id: a for a in sd.attendance}
 
-        # Anyone with no attendance before this date is a first-timer — the
-        # "New player" tickbox pre-ticks for them.
-        ever_ids = {pid for (pid,) in
-                    db.session.query(Attendance.player_id)
-                    .join(SessionDate, Attendance.session_date_id == SessionDate.id)
-                    .filter(SessionDate.date < sd.date).distinct()}
-        first_time_ids = [p.id for p in regular + walkins + others
-                          if p.id not in ever_ids]
-
         coaches        = Coach.query.filter_by(active=True).order_by(Coach.name).all()
         coach_ids      = {ca.coach_id for ca in
                           CoachAttendance.query.filter_by(session_date_id=sd.id).all()}
@@ -1245,7 +1244,6 @@ def create_app():
                                players=regular + walkins,
                                others=others,
                                attendance_map=attendance_map,
-                               first_time_ids=json.dumps(first_time_ids),
                                coaches=coaches, coach_ids=coach_ids,
                                totals=_totals(sd),
                                day_groups=sd.day_active_groups,
@@ -1279,7 +1277,7 @@ def create_app():
                 # No specific voucher chosen (e.g. checked in from a page without a
                 # voucher picker) — fall back to the oldest voucher with sessions left.
                 voucher = None
-                for v in (Voucher.query.filter_by(player_id=player_id)
+                for v in (Voucher.query.filter_by(player_id=player_id, hidden=False)
                           .order_by(Voucher.date_issued).all()):
                     eff_remaining = v.sessions_remaining + (1 if v.id == already_id else 0)
                     if eff_remaining > 0:
@@ -1425,13 +1423,58 @@ def create_app():
                 if limit_error:
                     flash(limit_error, 'danger')
                 else:
-                    db.session.add(Voucher(
+                    v = Voucher(
                         player_id=player_id, voucher_number=voucher_num,
                         amount=amount, sessions_total=sessions,
                         date_issued=issued_date, notes=notes,
-                    ))
+                    )
+                    v.continues_from = _voucher_to_continue(player_id)
+                    db.session.add(v)
                     db.session.commit()
-                    flash('Voucher created.', 'success')
+                    flash('Voucher created.' + (f' Continues from {v.continues_from.label}.'
+                                                if v.continues_from else ''), 'success')
+            elif action == 'edit':
+                v = Voucher.query.get_or_404(int(request.form['voucher_id']))
+                vnum = request.form.get('voucher_number', '').strip() or None
+                if vnum and Voucher.query.filter(
+                        db.func.lower(Voucher.voucher_number) == vnum.lower(),
+                        Voucher.id != v.id).first():
+                    flash(f'Voucher number "{vnum}" is already registered to another voucher.', 'danger')
+                    return redirect(url_for('vouchers', year=request.form.get('year', ''),
+                                            show_hidden=request.form.get('show_hidden', '')))
+                v.voucher_number = vnum
+                try:
+                    v.date_issued = date.fromisoformat(request.form.get('date_issued', ''))
+                except ValueError:
+                    pass
+                try:
+                    v.amount = float(request.form.get('amount') or v.amount)
+                    v.sessions_total = max(1, int(request.form.get('sessions_total') or v.sessions_total))
+                except ValueError:
+                    pass
+                v.notes  = request.form.get('notes', '').strip() or None
+                v.hidden = bool(request.form.get('hidden'))
+                cf = _int(request.form.get('continues_from_id'))
+                if cf and cf != v.id:
+                    prev = db.session.get(Voucher, cf)
+                    v.continues_from = prev if (prev and prev.player_id == v.player_id) else None
+                else:
+                    v.continues_from = None
+                db.session.commit()
+                flash('Voucher updated.', 'success')
+            elif action == 'hide' or action == 'unhide':
+                v = Voucher.query.get_or_404(int(request.form['voucher_id']))
+                v.hidden = action == 'hide'
+                db.session.commit()
+                flash('Voucher hidden.' if v.hidden else 'Voucher visible again.', 'success')
+            elif action == 'hide_used':
+                n = 0
+                for v in Voucher.query.filter_by(hidden=False).all():
+                    if v.sessions_remaining == 0:
+                        v.hidden = True
+                        n += 1
+                db.session.commit()
+                flash(f'{n} used-up voucher{"s" if n != 1 else ""} hidden.', 'success')
             elif action == 'delete':
                 v = Voucher.query.get_or_404(int(request.form['voucher_id']))
                 if v.sessions_used:
@@ -1440,12 +1483,19 @@ def create_app():
                     db.session.delete(v)
                     db.session.commit()
                     flash('Voucher deleted.', 'success')
-            return redirect(url_for('vouchers', year=request.form.get('year', '')))
+            return redirect(url_for('vouchers', year=request.form.get('year', ''),
+                                    show_hidden=request.form.get('show_hidden', '')))
 
         year = request.args.get('year', date.today().year, type=int)
-        voucher_list = (Voucher.query.join(Player)
-                        .filter(db.extract('year', Voucher.date_issued) == year)
-                        .order_by(Player.name, Voucher.date_issued).all())
+        show_hidden = request.args.get('show_hidden') == '1'
+        q = (Voucher.query.join(Player)
+             .filter(db.extract('year', Voucher.date_issued) == year))
+        if not show_hidden:
+            q = q.filter(Voucher.hidden == False)
+        voucher_list = q.order_by(Player.name, Voucher.date_issued).all()
+        hidden_count = (Voucher.query
+                        .filter(db.extract('year', Voucher.date_issued) == year,
+                                Voucher.hidden == True).count())
 
         available_years = sorted({
             y for (y,) in db.session.query(db.extract('year', Voucher.date_issued)).distinct().all()
@@ -1455,9 +1505,98 @@ def create_app():
 
         return render_template('vouchers.html',
                                voucher_list=voucher_list, year=year, available_years=available_years,
+                               show_hidden=show_hidden, hidden_count=hidden_count,
                                active_players=active_players,
                                DEFAULT_VOUCHER_AMOUNT=_voucher_defaults()['amount'],
                                DEFAULT_VOUCHER_SESSIONS=_voucher_defaults()['sessions'])
+
+    def _voucher_to_continue(player_id):
+        """The child's most recent used-up voucher that nothing follows on
+        from yet — the natural 'previous voucher' for a new one."""
+        for v in (Voucher.query.filter_by(player_id=player_id)
+                  .order_by(Voucher.date_issued.desc(), Voucher.id.desc()).all()):
+            if v.sessions_remaining == 0 and v.continued_by is None:
+                return v
+        return None
+
+    # ── Voucher detail + usage editing (AJAX, Vouchers page edit dialog) ──
+
+    def _voucher_json(v):
+        uses = []
+        for a in sorted(v.attendance_records,
+                        key=lambda a: db.session.get(SessionDate, a.session_date_id).date):
+            sd = db.session.get(SessionDate, a.session_date_id)
+            uses.append({'kind': 'checkin', 'id': a.id,
+                         'date': sd.date.isoformat(),
+                         'label': f'{sd.template.name} — checked in'})
+        for u in v.manual_uses:
+            uses.append({'kind': 'manual', 'id': u.id,
+                         'date': u.used_date.isoformat() if u.used_date else '',
+                         'note': u.note or ''})
+        uses.sort(key=lambda x: x['date'] or '9999')
+        siblings = [{'id': o.id, 'label': o.label, 'used': o.sessions_used,
+                     'total': o.sessions_total}
+                    for o in Voucher.query.filter_by(player_id=v.player_id)
+                    .order_by(Voucher.date_issued).all() if o.id != v.id]
+        return {
+            'id': v.id, 'player': v.player.name,
+            'voucher_number': v.voucher_number or '',
+            'date_issued': v.date_issued.isoformat(),
+            'amount': round(float(v.amount or 0)),
+            'sessions_total': v.sessions_total,
+            'sessions_used': v.sessions_used,
+            'sessions_remaining': v.sessions_remaining,
+            'notes': v.notes or '', 'hidden': bool(v.hidden),
+            'continues_from_id': v.continues_from_id,
+            'continued_by': v.continued_by.label if v.continued_by else None,
+            'other_vouchers': siblings,
+            'uses': uses,
+        }
+
+    @app.route('/api/voucher/<int:voucher_id>')
+    def api_voucher(voucher_id):
+        return jsonify(ok=True, voucher=_voucher_json(Voucher.query.get_or_404(voucher_id)))
+
+    @app.route('/api/voucher/<int:voucher_id>/use', methods=['POST'])
+    def api_voucher_use_add(voucher_id):
+        """Add a manually-dated use (e.g. a session used before the app, or
+        one missed at check-in)."""
+        v = Voucher.query.get_or_404(voucher_id)
+        data = request.get_json() or {}
+        if v.sessions_remaining <= 0:
+            return jsonify(ok=False, error='This voucher has no sessions left.')
+        d = None
+        if data.get('date'):
+            try:
+                d = date.fromisoformat(data['date'])
+            except ValueError:
+                return jsonify(ok=False, error='Invalid date.')
+        db.session.add(VoucherUse(voucher=v, used_date=d,
+                                  note=(data.get('note') or 'Added manually')[:120]))
+        db.session.commit()
+        return jsonify(ok=True, voucher=_voucher_json(v))
+
+    @app.route('/api/voucher/<int:voucher_id>/use/<int:use_id>', methods=['POST', 'DELETE'])
+    def api_voucher_use_edit(voucher_id, use_id):
+        v = Voucher.query.get_or_404(voucher_id)
+        u = VoucherUse.query.filter_by(id=use_id, voucher_id=v.id).first_or_404()
+        if request.method == 'DELETE':
+            db.session.delete(u)
+            db.session.commit()
+            return jsonify(ok=True, voucher=_voucher_json(v))
+        data = request.get_json() or {}
+        if 'date' in data:
+            if data['date']:
+                try:
+                    u.used_date = date.fromisoformat(data['date'])
+                except ValueError:
+                    return jsonify(ok=False, error='Invalid date.')
+            else:
+                u.used_date = None
+        if 'note' in data:
+            u.note = (data['note'] or '')[:120] or None
+        db.session.commit()
+        return jsonify(ok=True, voucher=_voucher_json(v))
 
     @app.route('/vouchers/<int:voucher_id>/pdf')
     def voucher_pdf(voucher_id):
@@ -1505,13 +1644,18 @@ def create_app():
         elements.append(Paragraph('Sessions Attended Using This Voucher', styles['Heading3']))
         elements.append(Spacer(1, 4 * mm))
 
-        table_data = [['Date', 'Session', 'Group']]
+        rows_ = []
         for a in usage:
-            table_data.append([
-                a.session_date.date.strftime('%d %b %Y'),
-                a.session_date.template.name,
-                a.group.name if a.group else '—',
-            ])
+            rows_.append((a.session_date.date,
+                          a.session_date.date.strftime('%d %b %Y'),
+                          a.session_date.template.name,
+                          a.group.name if a.group else '—'))
+        for u in v.manual_uses:
+            rows_.append((u.used_date or date.max,
+                          u.used_date.strftime('%d %b %Y') if u.used_date else 'Date unknown',
+                          u.note or 'Recorded manually', '—'))
+        rows_.sort(key=lambda r: r[0])
+        table_data = [['Date', 'Session', 'Group']] + [list(r[1:]) for r in rows_]
         if len(table_data) == 1:
             table_data.append(['No sessions recorded yet.', '', ''])
 
@@ -1570,6 +1714,7 @@ def create_app():
                 'remaining':      {'remaining', 'remaining lessons', 'remaining sessions', 'lessons left', 'balance'},
                 'date_issued':    {'date issued', 'issued', 'date'},
                 'notes':          {'notes'},
+                'used_dates':     {'used dates', 'dates used', 'used'},
             }
 
             # The header row isn't always row 1 — balance sheets have title rows
@@ -1691,12 +1836,20 @@ def create_app():
                         sessions = _voucher_defaults()['sessions']
                     notes = cell(row, 'notes') or None
 
-                db.session.add(Voucher(
+                v_new = Voucher(
                     player_id=player.id, voucher_number=vnum,
                     amount=amount, sessions_total=sessions,
-                    sessions_used_before=used_before,
                     date_issued=issued, notes=notes,
-                ))
+                )
+                db.session.add(v_new)
+                if used_before:
+                    # Dated where the sheet says so (a "Used Dates" column, or
+                    # the dates written into the note); the rest "date unknown".
+                    raw_dates = cell(row, 'used_dates')
+                    dates = ([d for d in (_parse_loose_date(p.strip(), issued)
+                                          for p in raw_dates.split(',')) if d]
+                             if raw_dates else _uses_from_notes(notes, issued))
+                    _add_voucher_uses(v_new, used_before, dates)
                 db.session.flush()   # so the limit check sees this voucher for repeat names
                 if vnum:
                     existing_numbers.add(vnum.lower())
@@ -1726,7 +1879,8 @@ def create_app():
 
     @app.route('/api/player/<int:player_id>/vouchers')
     def api_player_vouchers(player_id):
-        vs = Voucher.query.filter_by(player_id=player_id).order_by(Voucher.date_issued.desc()).all()
+        vs = (Voucher.query.filter_by(player_id=player_id, hidden=False)
+              .order_by(Voucher.date_issued.desc()).all())
         return jsonify(ok=True, vouchers=[{
             'id':                 v.id,
             'label':              (f"#{v.voucher_number} — " if v.voucher_number else '')
@@ -1747,6 +1901,7 @@ def create_app():
         if limit_error:
             return jsonify(ok=False, error=limit_error)
         v = Voucher(player_id=player_id, amount=amount, sessions_total=sessions, date_issued=issued_date)
+        v.continues_from = _voucher_to_continue(player_id)
         db.session.add(v)
         db.session.commit()
         return jsonify(ok=True, voucher={
@@ -2295,7 +2450,9 @@ def create_app():
                 if a.voucher_id:
                     v = db.session.get(Voucher, a.voucher_id)
                     if v:
-                        v.sessions_used_before = (v.sessions_used_before or 0) + 1
+                        db.session.add(VoucherUse(
+                            voucher=v, used_date=sd.date,
+                            note=f'{sd.template.name} (calendar cleared)'))
                         n_voucher += 1
                 n_att += 1
             CoachAttendance.query.filter_by(session_date_id=sd.id).delete()
@@ -2964,6 +3121,73 @@ def _coach_pay_amount(coach, template, hours=None):
 
 def _coach_month_finalised(year, month):
     return Setting.get(f'coach_month_final_{year:04d}-{month:02d}', '0') == '1'
+
+
+def _parse_loose_date(text, ref_date):
+    """Best-effort date from the ways people write them on paper: '28/06/2026',
+    '12/7', '19/7/26', 'Sun 19/7', '5-Jul', '12 July'. Day/month-only forms
+    take ref_date's year, rolling forward a year if that lands before
+    ref_date (a voucher is used after it was issued). None if unparseable."""
+    import re as _re
+    if not text:
+        return None
+    s = str(text).strip()
+    s = _re.sub(r'^(sun|mon|tue|wed|thu|fri|sat)\w*\s+', '', s, flags=_re.I)
+    s = s.replace('(struck)', '').strip()
+    y_known = True
+    m = _re.match(r'^(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?$', s)
+    if m:
+        d, mo = int(m.group(1)), int(m.group(2))
+        if m.group(3):
+            y = int(m.group(3)); y = y + 2000 if y < 100 else y
+        else:
+            y, y_known = ref_date.year, False
+    else:
+        months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun',
+                  'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+        m = _re.match(r'^(\d{1,2})[\s-]+([A-Za-z]{3})[A-Za-z]*$', s)
+        if not m or m.group(2).lower() not in months:
+            try:
+                return date.fromisoformat(s)
+            except ValueError:
+                return None
+        d, mo, y, y_known = int(m.group(1)), months.index(m.group(2).lower()) + 1, ref_date.year, False
+    try:
+        result = date(y, mo, d)
+    except ValueError:
+        return None
+    if not y_known and result < ref_date:
+        try:
+            result = date(y + 1, mo, d)
+        except ValueError:
+            return None
+    return result
+
+
+def _uses_from_notes(notes, ref_date):
+    """Dates listed after 'used:' in an imported-balance note."""
+    import re as _re
+    if not notes:
+        return []
+    m = _re.search(r'used:\s*([^)]*)', notes)
+    if not m:
+        return []
+    out = []
+    for part in m.group(1).split(','):
+        d = _parse_loose_date(part.strip(), ref_date)
+        if d:
+            out.append(d)
+    return out
+
+
+def _add_voucher_uses(voucher, count, dates, note='Imported balance'):
+    """Create `count` VoucherUse rows, dated from `dates` while they last."""
+    dates = list(dates)[:count]
+    for d in dates:
+        db.session.add(VoucherUse(voucher=voucher, used_date=d, note=note))
+    for _ in range(count - len(dates)):
+        db.session.add(VoucherUse(voucher=voucher, used_date=None,
+                                  note=f'{note} (date unknown)'))
 
 
 def _voucher_defaults():

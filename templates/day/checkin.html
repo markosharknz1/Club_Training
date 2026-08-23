@@ -345,7 +345,6 @@ const DEFAULT_PAY = 'Card';
 const GROUPS_ENABLED = {{ 'true' if groups_enabled else 'false' }};
 const ROW_COLS = GROUPS_ENABLED ? 3 : 2;
 const FIELD_CFG   = {{ field_cfg | tojson }};
-const FIRST_TIME  = new Set({{ first_time_ids | safe }});
 
 // Show/hide optional player fields based on selected Junior/Senior category
 function applyFieldVisibility(prefix, category) {
@@ -393,9 +392,8 @@ function openCheckin(pid, name, currentSdId, currentGroupId, currentPayType, cur
   document.getElementById('modal-current-sd-id').value = currentSdId || '';
   document.getElementById('modal-name').textContent   = name;
   document.getElementById('modal-error').classList.add('d-none');
-  // Pre-tick "New player" for first-timers; keep the saved flag when editing
-  document.getElementById('modal-new-member').checked =
-    isCheckedIn ? !!currentNewMember : FIRST_TIME.has(pid);
+  // "New player" always starts unticked; keep the saved flag when editing
+  document.getElementById('modal-new-member').checked = isCheckedIn ? !!currentNewMember : false;
 
   // Pre-select session (auto-select if only one)
   selectedSdId = currentSdId;
@@ -770,7 +768,7 @@ function confirmAddPlayer(force) {
     bootstrap.Modal.getInstance(document.getElementById('addPlayerModal')).hide();
     addPlayerRow(data.player);
     // Open check-in for the new player immediately
-    openCheckin(data.player.id, data.player.name, null, null, null, 0, null, true);
+    openCheckin(data.player.id, data.player.name, null, null, null, 0, null, false);
   });
 }
 

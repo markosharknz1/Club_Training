@@ -528,16 +528,16 @@ own machine and demo to other club members (e.g. "Carol").
 35. **"New player" tickbox at check-in** (user: "flag new members with a tickbox… might/might
     not be a payment type, but we want to record new people"). `Attendance.new_member` boolean
     (add-only migration), fully independent of payment type. Tickbox appears in BOTH check-in
-    modals (day/checkin.html player-first flow and register/run.html) and **pre-ticks
-    automatically for first-timers** — players with no attendance before that date (server
-    passes `first_time_ids` → JS `FIRST_TIME` set; freshly-created players from the check-in
-    add-player modal always pre-tick). Editing a check-in keeps/toggles the saved flag
+    modals (day/checkin.html player-first flow and register/run.html). It **always starts
+    UNTICKED** — v1.5.0 auto-pre-ticked first-timers and the user asked for that to be
+    removed in v1.5.3 ("defaulting to ticking the new player box… set to unflagged"); do not
+    reintroduce it. Editing a check-in keeps/toggles the saved flag
     (carried in the row's `data-checkin` JSON / openModal args). Yellow NEW badges on
     register + checked-in rows; day summary gains a "New Players Today" card (names +
     sessions) and `day_totals['new']`; Reports gains a New Players tile + monthly "New"
     column (`_reports_data` row['new'], total_new); both Excel exports gained New Players
     columns (monthly export Session Summary sheet + reports Monthly Attendance sheet).
-    The register "Check in all" bulk path auto-flags first-timers too.
+    The register "Check in all" bulk path never sets the flag.
 
 36. **Voucher carryover representation fix + "Clear Old Calendar Entries"** (user: "imported
     are showing 0 sessions used, not 4/10" and "need a way to clear all of the old calendar
@@ -555,6 +555,32 @@ own machine and demo to other club members (e.g. "Carol").
     untouched. NOTE: the dev DB in C:\Club_Training has zero session_dates — the user's live
     data lives in their unzipped release folder, so diagnose from descriptions/screenshots,
     not the dev copy.
+
+37. **Voucher editing: dated uses, hide, linking** (user: "edit/change the Sports Vouchers —
+    change dates used, add dates, and hide old vouchers. New voucher should link to the old").
+    New `VoucherUse` table (voucher_id, used_date nullable = unknown, note): every voucher
+    session used OUTSIDE a live check-in — imported carryover balances, manual backdated uses,
+    and check-ins folded in by the calendar purge. `Voucher.sessions_used` = manual_uses +
+    attendance rows (+ legacy `sessions_used_before`, which a one-time migration converts to
+    VoucherUse rows, recovering dates from the "used: …" part of import notes via
+    `_parse_loose_date` — day/month-only dates take the issue year, rolling forward if before
+    issue). `Voucher.hidden` + `continues_from_id` (self-FK; backref `continued_by`) added
+    (migration ORDER matters: these ALTERs must run before any ORM Voucher query in
+    create_app — they sit before the sessions_used_before block). Importer accepts a
+    **"Used Dates"** column (comma-separated; the converter for the user's slot-by-slot sheet
+    emits ISO dates) else falls back to the note. Vouchers page: **Edit** dialog (number, amount,
+    sessions, date issued, notes, hidden, "continues from" select of the child's other
+    vouchers) with a usage list — check-ins read-only, manual rows date/note-editable +
+    removable + "Add used date" (instant AJAX: `GET /api/voucher/<id>`, `POST
+    /api/voucher/<id>/use`, `POST|DELETE /api/voucher/<id>/use/<use_id>`); page reloads on
+    dialog close if uses changed. Hide/Unhide per row, "Hide all used-up vouchers", "Show
+    hidden (n)" toggle; hidden vouchers are excluded from the check-in picker and fallback
+    but still count for yearly limits. New vouchers (page form AND on-the-spot create at
+    check-in) auto-link to the child's most recent used-up voucher with no follow-on
+    (`_voucher_to_continue`); list shows "↳ continues …" / "→ followed by …". PDF lists
+    manual uses too ("Date unknown" rows last). Converter script for the user's
+    `sports-vouchers.xlsx` lives only in the session scratchpad (real kids' data — never in
+    the repo); output `sports-vouchers-import.xlsx` in the user's Downloads.
 
 ## Known open items (not yet built — need user input before building)
 

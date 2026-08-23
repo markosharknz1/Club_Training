@@ -334,7 +334,6 @@ let currentPlayerId = null;
 let isCheckedIn  = false;
 
 const AMOUNT_TYPES = new Set({{ AMOUNT_TYPES | tojson }});
-const FIRST_TIME   = new Set({{ first_time_ids | safe }});
 
 // ── Open check-in modal ─────────────────────────────────────────────
 function openModal(playerId, playerName, defaultGroupId, cashPrice, cardPrice,
@@ -346,9 +345,8 @@ function openModal(playerId, playerName, defaultGroupId, cashPrice, cardPrice,
   document.getElementById('modal-cash-price').value  = cashPrice;
   document.getElementById('modal-card-price').value  = cardPrice;
   document.getElementById('modal-error').classList.add('d-none');
-  // Pre-tick "New player" for first-timers; keep the saved flag when editing
-  document.getElementById('modal-new-member').checked =
-    isCheckedIn ? !!existingNewMember : FIRST_TIME.has(playerId);
+  // "New player" always starts unticked; keep the saved flag when editing
+  document.getElementById('modal-new-member').checked = isCheckedIn ? !!existingNewMember : false;
 
   // Set group
   const grpSel = document.getElementById('modal-group');
@@ -532,11 +530,11 @@ function checkInAll() {
     fetch('/register/' + SD_ID + '/checkin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ player_id: pid, payment_type: 'Cash', amount: cashPrice, group_id: null, new_member: FIRST_TIME.has(pid) }),
+      body: JSON.stringify({ player_id: pid, payment_type: 'Cash', amount: cashPrice, group_id: null, new_member: false }),
     })
     .then(r => r.json())
     .then(data => {
-      if (data.ok) { updateRow(pid, 'Cash', cashPrice, null, FIRST_TIME.has(pid)); updateTotals(data.totals); }
+      if (data.ok) { updateRow(pid, 'Cash', cashPrice, null, false); updateTotals(data.totals); }
     });
   });
 }

@@ -277,16 +277,29 @@ class Voucher(db.Model):
     # Sessions used that have NO attendance row in this app: carryover balances
     # imported from the old spreadsheet, plus check-ins folded in when old
     # calendar days are purged. sessions_used = this + live attendance rows.
-    sessions_used_before = db.Column(db.Integer, nullable=False, default=0)
+    sessions_used_before = db.Column(db.Integer, nullable=False, default=0)   # legacy; migrated into VoucherUse rows
     date_issued    = db.Column(db.Date, nullable=False, default=date_t.today)
     notes          = db.Column(db.String(200))
+    hidden         = db.Column(db.Boolean, nullable=False, default=False)      # tidy away old vouchers
+    continues_from_id = db.Column(db.Integer, db.ForeignKey('vouchers.id'))   # the voucher this one follows on from
     created_at     = db.Column(db.DateTime, default=datetime.utcnow)
 
     player = db.relationship('Player', backref='vouchers')
+    continues_from = db.relationship('Voucher', remote_side=[id],
+                                     backref=db.backref('continued_by', uselist=False))
+    manual_uses = db.relationship('VoucherUse', backref='voucher',
+                                  cascade='all, delete-orphan',
+                                  order_by='VoucherUse.used_date')
 
     @property
     def sessions_used(self):
-        return (self.sessions_used_before or 0) + len(self.attendance_records)
+        return ((self.sessions_used_before or 0) + len(self.manual_uses)
+                + len(self.attendance_records))
+
+    @property
+    def label(self):
+        return (f'#{self.voucher_number}' if self.voucher_number
+                else self.date_issued.strftime('%d %b %Y'))
 
     @property
     def sessions_remaining(self):
@@ -295,6 +308,20 @@ class Voucher(db.Model):
     @property
     def year(self):
         return self.date_issued.year
+
+
+class VoucherUse(db.Model):
+    """A voucher session used OUTSIDE a live check-in in this app: carryover
+    balances from the old paper sheets (dated where the sheet said so),
+    manually backdated uses, and check-ins folded in when old calendar days
+    are cleared. Editable on the Vouchers page. Live check-ins are counted
+    separately via Attendance.voucher_id."""
+    __tablename__ = 'voucher_uses'
+    id         = db.Column(db.Integer, primary_key=True)
+    voucher_id = db.Column(db.Integer, db.ForeignKey('vouchers.id'), nullable=False)
+    used_date  = db.Column(db.Date)            # None = date unknown
+    note       = db.Column(db.String(120))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 class Attendance(db.Model):
