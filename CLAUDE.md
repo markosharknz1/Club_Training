@@ -589,6 +589,41 @@ own machine and demo to other club members (e.g. "Carol").
     Known limitation: if a check-in in the app is ALSO ticked on the paper sheet it double
     counts — fix by removing the extra use in the Edit dialog.
 
+38. **Email providers (SMTP2GO / Mailgun / Gmail) + email designer with attachments** (user:
+    "choose an email provider… depending on volume", "designer needs basic functionality,
+    including ability to attach files (PDFs)", "add options for SMTP2Go, MailGun and Gmail
+    SMTP"). `_send_bulk_email(subject, body, addresses, html=None, attachments=None,
+    provider=None)` — still one message per address for privacy. Providers: **smtp2go**
+    (generic SMTP, existing smtp_* settings), **gmail** (fixed smtp.gmail.com:587,
+    `gmail_username`/`gmail_app_password` — needs a Google App Password; From is rewritten to
+    the Gmail account), **mailgun** (HTTP API via requests, `mailgun_api_key`/`mailgun_domain`
+    /`mailgun_region` us|eu → api[.eu].mailgun.net/v3/<domain>/messages, one POST per
+    recipient, attachments as multipart files). Shared From = `email_from`/`email_from_name`.
+    `email_provider` setting = preferred default; the Email page shows a "Send via" select
+    when >1 provider is configured (volume guide: Gmail ≈500/day, SMTP2GO mid, Mailgun bulk).
+    `_email_configured()` = sending enabled AND ≥1 provider configured
+    (`_configured_providers()`); Settings → Email shows three provider cards with
+    "configured" badges, keep-if-blank secrets, and a test-send form with a provider select.
+    **Designer**: contenteditable editor with toolbar (bold/italic/underline/lists/H3/link/
+    clear via document.execCommand), hidden `body` (innerText) + `body_html` (innerHTML)
+    filled at submit; server derives a text fallback if only HTML arrives. SMTP path builds
+    multipart/mixed + multipart/alternative; attachments `<input type=file multiple>`,
+    **10 MB total cap** enforced client- AND server-side, any file type, same files to every
+    recipient. Tests mock `appmod.smtplib.SMTP` and `appmod.requests.post` (21 checks).
+    **Recipient control** (same release; user: "list to show who is going to be emailed…
+    double check that i'm not about to email everyone", type-in address, BCC the club,
+    show provider): the recipients card lists name + email with TICKBOXES (all ticked by
+    default, Select-all toggle, live count; inputs use `form="composeForm"` to join the
+    compose form across columns). Server sends ONLY ticked addresses, intersected with the
+    audience so forged values are ignored. "Also send to" = free-typed extras (comma/space
+    separated, loose @-validation, invalid ones flashed as skipped). "BCC a copy to" = ONE
+    copy to that address (a literal per-message BCC would give the club N copies since every
+    recipient gets an individual email — this was explained to and accepted by the user).
+    All addresses case-insensitively deduped. Send button + confirm dialog show live count
+    AND provider name ("Send to 12 addresses via Mailgun?"); the Send via select is always
+    visible. Zero recipients refused client- and server-side (9 more checks in
+    test_email_recipients.py).
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

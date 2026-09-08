@@ -4,7 +4,7 @@ Run:  python app.py
 """
 import calendar as _cal_mod
 import base64
-import glob, json, os, shutil, smtplib, socket, sys, threading, time, webbrowser
+import glob, json, os, re, shutil, smtplib, socket, sys, threading, time, webbrowser
 import requests
 from email.mime.text import MIMEText
 from collections import defaultdict, OrderedDict
@@ -21,7 +21,7 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
 
-APP_VERSION = '1.6.1'
+APP_VERSION = '1.7.0'
 
 # ─── Branding ───────────────────────────────────────────────────────
 # Bundled club icons (static/icons/sports/<key>.svg — see LICENSE.md there).
@@ -2338,7 +2338,14 @@ def create_app():
                 smtp_username=Setting.get('smtp_username', ''),
                 email_from=Setting.get('email_from', ''),
                 email_from_name=Setting.get('email_from_name', ''),
-                smtp_password_set=bool(Setting.get('smtp_password', '')))
+                smtp_password_set=bool(Setting.get('smtp_password', '')),
+                email_provider=Setting.get('email_provider', 'smtp2go'),
+                mailgun_domain=Setting.get('mailgun_domain', ''),
+                mailgun_region=Setting.get('mailgun_region', 'us'),
+                mailgun_key_set=bool(Setting.get('mailgun_api_key', '')),
+                gmail_username=Setting.get('gmail_username', ''),
+                gmail_password_set=bool(Setting.get('gmail_app_password', '')),
+                configured_providers=_configured_providers())
         elif section == 'data':
             past = (SessionDate.query.filter(SessionDate.date < date.today())
                     .order_by(SessionDate.date).all())
@@ -2430,6 +2437,19 @@ def create_app():
             new_pwd = request.form.get('smtp_password', '').strip()
             if new_pwd:
                 Setting.set('smtp_password', new_pwd)
+            prov = request.form.get('email_provider', 'smtp2go')
+            if prov in ('smtp2go', 'mailgun', 'gmail'):
+                Setting.set('email_provider', prov)
+            Setting.set('mailgun_domain', request.form.get('mailgun_domain', '').strip())
+            region = request.form.get('mailgun_region', 'us')
+            Setting.set('mailgun_region', region if region in ('us', 'eu') else 'us')
+            new_key = request.form.get('mailgun_api_key', '').strip()
+            if new_key:
+                Setting.set('mailgun_api_key', new_key)
+            Setting.set('gmail_username', request.form.get('gmail_username', '').strip())
+            new_gpwd = request.form.get('gmail_app_password', '').strip()
+            if new_gpwd:
+                Setting.set('gmail_app_password', new_gpwd)
         elif section == 'data':
             Setting.set('testing_mode', '1' if request.form.get('testing_mode') else '0')
         return None
@@ -2448,12 +2468,15 @@ def create_app():
             flash('Fill in and save the SMTP details first.', 'warning')
             return redirect(url_for('settings_section', section='email'))
         club = Setting.get('club_name', 'Club Training')
+        provider = request.form.get('provider', '')
+        if provider not in {k for k, _ in _configured_providers()}:
+            provider = _default_provider()
         try:
             sent, failures = _send_bulk_email(
                 f'{club} — test email',
-                f'This is a test email from {club} (Club Training app). '
-                'If you can read this, email sending is working.',
-                [to])
+                f'This is a test email from {club} (Club Training app), sent '
+                f'via {provider}. If you can read this, email sending is working.',
+                [to], provider=provider)
         except (smtplib.SMTPException, OSError) as e:
             flash(f'Test email failed: {e} — check the SMTP details.', 'danger')
             return redirect(url_for('settings_section', section='email'))
@@ -2558,6 +2581,8 @@ def create_app():
                                months=months, session_id=session_id,
                                all_sessions=all_sessions,
                                email_map=email_map, missing=missing,
+                               providers=_configured_providers(),
+                               default_provider=_default_provider(),
                                email_configured=_email_configured())
 
     @app.route('/email/send', methods=['POST'])
@@ -2569,20 +2594,72 @@ def create_app():
         months     = request.form.get('months', 3, type=int)
         session_id = request.form.get('session_id', type=int)
         subject    = request.form.get('subject', '').strip()
-        body       = request.form.get('body', '').strip()
-        if not subject or not body:
+        body       = request.form.get('body', '').strip()          # plain-text version
+        body_html  = request.form.get('body_html', '').strip() or None
+        provider   = request.form.get('provider', '')
+        if provider not in {k for k, _ in _configured_providers()}:
+            provider = _default_provider()
+        if not subject or not (body or body_html):
             flash('Subject and message are both required.', 'danger')
             return redirect(url_for('email_players', months=months, session_id=session_id))
+        if not body and body_html:
+            # crude but reliable plain-text fallback for HTML-only submissions
+            import re as _re
+            body = _re.sub(r'<br\s*/?>', '\n', body_html)
+            body = _re.sub(r'</(p|div|li|h[1-6])>', '\n', body)
+            body = _re.sub(r'<[^>]+>', '', body)
 
+        # Attachments: any file type (PDFs, images…), 10 MB total
+        attachments = []
+        total = 0
+        for f in request.files.getlist('attachments'):
+            if not f or not f.filename:
+                continue
+            blob = f.read()
+            total += len(blob)
+            if total > 10 * 1024 * 1024:
+                flash('Attachments are over 10 MB in total — email providers '
+                      'reject messages that big. Remove or shrink a file.', 'danger')
+                return redirect(url_for('email_players', months=months, session_id=session_id))
+            attachments.append((os.path.basename(f.filename), blob,
+                                f.mimetype or 'application/octet-stream'))
+
+        # Recipients: only the TICKED player addresses, plus any typed-in
+        # extras, plus an optional single "copy to" (BCC-style — one copy,
+        # since every recipient already gets an individual email).
         email_map, _ = _recent_player_emails(months, session_id)
-        if not email_map:
-            flash('No recipients found for that period.', 'warning')
+        ticked = set(request.form.getlist('recipients'))
+        addresses = [a for a in email_map if a in ticked]
+        skipped_bad = []
+        for raw in re.split(r'[,;\s]+', request.form.get('extra_recipients', '')):
+            raw = raw.strip()
+            if not raw:
+                continue
+            if '@' in raw and '.' in raw.rsplit('@', 1)[-1]:
+                addresses.append(raw)
+            else:
+                skipped_bad.append(raw)
+        bcc = request.form.get('bcc_copy', '').strip()
+        if bcc:
+            if '@' in bcc and '.' in bcc.rsplit('@', 1)[-1]:
+                addresses.append(bcc)
+            else:
+                skipped_bad.append(bcc)
+        seen = set()
+        addresses = [a for a in addresses
+                     if a.lower() not in seen and not seen.add(a.lower())]
+        if skipped_bad:
+            flash(f'Not a valid email address, skipped: {", ".join(skipped_bad[:5])}', 'warning')
+        if not addresses:
+            flash('No recipients selected — tick at least one, or type an address.', 'warning')
             return redirect(url_for('email_players', months=months, session_id=session_id))
 
         try:
-            sent, failures = _send_bulk_email(subject, body, list(email_map.keys()))
+            sent, failures = _send_bulk_email(subject, body, addresses,
+                                              html=body_html, attachments=attachments,
+                                              provider=provider)
         except (smtplib.SMTPException, OSError) as e:
-            flash(f'Could not send: {e} — check the SMTP details in Club Settings.', 'danger')
+            flash(f'Could not send: {e} — check the email settings in Club Settings.', 'danger')
             return redirect(url_for('email_players', months=months, session_id=session_id))
 
         msg = f'Sent to {sent} address{"es" if sent != 1 else ""}.'
@@ -3031,9 +3108,7 @@ def _build_player_matcher(players):
 
 def _email_configured():
     return (Setting.get('email_sending_enabled', '0') == '1'
-            and bool(Setting.get('smtp_username', ''))
-            and bool(Setting.get('smtp_password', ''))
-            and bool(Setting.get('email_from', '')))
+            and bool(_configured_providers()))
 
 
 def _recent_player_emails(months, session_id=None):
@@ -3062,25 +3137,123 @@ def _recent_player_emails(months, session_id=None):
     return email_map, missing
 
 
-def _send_bulk_email(subject, body, addresses):
+def _smtp2go_configured():
+    return (bool(Setting.get('smtp_username', ''))
+            and bool(Setting.get('smtp_password', ''))
+            and bool(Setting.get('email_from', '')))
+
+
+def _mailgun_configured():
+    return (bool(Setting.get('mailgun_api_key', ''))
+            and bool(Setting.get('mailgun_domain', ''))
+            and bool(Setting.get('email_from', '')))
+
+
+def _gmail_configured():
+    return (bool(Setting.get('gmail_username', ''))
+            and bool(Setting.get('gmail_app_password', '')))
+
+
+def _configured_providers():
+    """[(key, label)] of providers ready to send."""
+    out = []
+    if _smtp2go_configured():
+        out.append(('smtp2go', 'SMTP2GO'))
+    if _mailgun_configured():
+        out.append(('mailgun', 'Mailgun'))
+    if _gmail_configured():
+        out.append(('gmail', 'Gmail'))
+    return out
+
+
+def _default_provider():
+    pref = Setting.get('email_provider', 'smtp2go')
+    keys = [k for k, _ in _configured_providers()]
+    if pref in keys:
+        return pref
+    return keys[0] if keys else pref
+
+
+def _send_bulk_email(subject, body, addresses, html=None, attachments=None,
+                     provider=None):
     """Send one individual email per address (no shared To/CC — keeps parents'
-    addresses private from each other). Returns (sent_count, failures)."""
-    host      = Setting.get('smtp_host', 'mail.smtp2go.com') or 'mail.smtp2go.com'
-    port      = int(Setting.get('smtp_port', '2525') or 2525)
-    user      = Setting.get('smtp_username', '')
-    password  = Setting.get('smtp_password', '')
+    addresses private from each other) via SMTP2GO (SMTP) or Mailgun (API,
+    better suited to larger volumes). `attachments` = [(filename, bytes,
+    mimetype)]. Returns (sent_count, failures)."""
+    provider  = provider or _default_provider()
     from_addr = Setting.get('email_from', '')
     from_name = Setting.get('email_from_name', '') or Setting.get('club_name', '')
-
+    from_hdr  = f'{from_name} <{from_addr}>' if from_name else from_addr
+    attachments = attachments or []
     sent, failures = 0, []
+
+    if provider == 'mailgun':
+        region = Setting.get('mailgun_region', 'us')
+        base   = ('https://api.eu.mailgun.net' if region == 'eu'
+                  else 'https://api.mailgun.net')
+        domain = Setting.get('mailgun_domain', '')
+        auth   = ('api', Setting.get('mailgun_api_key', ''))
+        url    = f'{base}/v3/{domain}/messages'
+        for addr in addresses:
+            data = {'from': from_hdr, 'to': addr, 'subject': subject,
+                    'text': body}
+            if html:
+                data['html'] = html
+            files = [('attachment', (name, blob, mime))
+                     for name, blob, mime in attachments]
+            try:
+                resp = requests.post(url, auth=auth, data=data,
+                                     files=files or None, timeout=60)
+                if resp.status_code == 200:
+                    sent += 1
+                else:
+                    detail = ''
+                    try:
+                        detail = resp.json().get('message', '')[:60]
+                    except Exception:
+                        pass
+                    failures.append(f'{addr} (Mailgun {resp.status_code}'
+                                    + (f': {detail}' if detail else '') + ')')
+            except requests.RequestException as e:
+                failures.append(f'{addr} ({e.__class__.__name__})')
+        return sent, failures
+
+    # SMTP providers: SMTP2GO (or any standard SMTP) and Gmail
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.application import MIMEApplication
+    if provider == 'gmail':
+        host, port = 'smtp.gmail.com', 587
+        user     = Setting.get('gmail_username', '')
+        password = Setting.get('gmail_app_password', '')
+        # Gmail rewrites the From to the authenticated account anyway
+        from_hdr = f'{from_name} <{user}>' if from_name else user
+    else:
+        host     = Setting.get('smtp_host', 'mail.smtp2go.com') or 'mail.smtp2go.com'
+        port     = int(Setting.get('smtp_port', '2525') or 2525)
+        user     = Setting.get('smtp_username', '')
+        password = Setting.get('smtp_password', '')
     with smtplib.SMTP(host, port, timeout=30) as server:
         server.starttls()
         server.login(user, password)
         for addr in addresses:
             try:
-                msg = MIMEText(body, 'plain', 'utf-8')
+                if html or attachments:
+                    msg = MIMEMultipart('mixed')
+                    alt = MIMEMultipart('alternative')
+                    alt.attach(MIMEText(body, 'plain', 'utf-8'))
+                    if html:
+                        alt.attach(MIMEText(html, 'html', 'utf-8'))
+                    msg.attach(alt)
+                    for name, blob, mime in attachments:
+                        maintype, _, subtype = (mime or 'application/octet-stream').partition('/')
+                        part = MIMEApplication(blob, _subtype=subtype or 'octet-stream')
+                        part.add_header('Content-Disposition', 'attachment',
+                                        filename=name)
+                        msg.attach(part)
+                else:
+                    msg = MIMEText(body, 'plain', 'utf-8')
                 msg['Subject'] = subject
-                msg['From']    = f'{from_name} <{from_addr}>' if from_name else from_addr
+                msg['From']    = from_hdr
                 msg['To']      = addr
                 server.send_message(msg)
                 sent += 1

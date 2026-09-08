@@ -1,7 +1,7 @@
 {% extends 'settings/_layout.html' %}
 {% block section_content %}
 
-<div class="card shadow-sm border-0" style="max-width:560px">
+<div class="card shadow-sm border-0" style="max-width:620px">
   <div class="card-header fw-semibold">Email</div>
   <div class="card-body">
     <form method="post" action="/settings/email">
@@ -19,51 +19,138 @@
         <input class="form-check-input" type="checkbox" role="switch" name="email_sending_enabled"
                id="email-sending-toggle" value="1" {% if email_sending_enabled %}checked{% endif %}>
         <label class="form-check-label fw-semibold" for="email-sending-toggle">
-          Email sending (SMTP2GO / external provider)</label>
+          Email sending</label>
       </div>
       <div class="form-text mb-3">Enables the Email page for announcements (tournaments etc.)
-        and the SMTP settings below. Works with SMTP2GO or any standard SMTP provider.</div>
+        and the provider settings below.</div>
 
       <div id="smtpFields" {% if not email_sending_enabled %}class="d-none"{% endif %}>
         <hr>
-        <p class="small mb-3">
-          Bulk email providers apply sending limits that vary by plan and account age. If you're
-          using SMTP2GO, read their guide to sending limits before your first large send:
-          <a href="https://www.smtp2go.com/blog/know-your-sending-limits/"
-             target="_blank" rel="noopener noreferrer">SMTP2GO Sending Limits: Every Cap, Why It
-          Exists, and How to Lift It</a>.
-        </p>
-        <p class="text-muted small mb-3">Leave the password blank when saving to keep the stored
-          one unchanged.</p>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Preferred provider</label>
+          <select name="email_provider" class="form-select" style="max-width:280px">
+            <option value="smtp2go" {% if email_provider == 'smtp2go' %}selected{% endif %}>SMTP2GO</option>
+            <option value="mailgun" {% if email_provider == 'mailgun' %}selected{% endif %}>Mailgun</option>
+            <option value="gmail"   {% if email_provider == 'gmail'   %}selected{% endif %}>Gmail</option>
+          </select>
+          <div class="form-text">Used by default; you can switch per send on the Email page.
+            Rough guide by volume: <strong>Gmail</strong> for occasional notes (~500/day cap),
+            <strong>SMTP2GO</strong> for regular club emails (generous free tier),
+            <strong>Mailgun</strong> for larger volumes.</div>
+        </div>
+
         <div class="row g-2 mb-3">
-          <div class="col-8">
-            <label class="form-label fw-semibold">SMTP server</label>
-            <input type="text" name="smtp_host" class="form-control" value="{{ smtp_host }}">
+          <div class="col-7">
+            <label class="form-label fw-semibold">From address</label>
+            <input type="email" name="email_from" class="form-control" value="{{ email_from }}"
+                   placeholder="e.g. club@yourdomain.com">
+            <div class="form-text">Must be verified with SMTP2GO / Mailgun. Gmail always sends
+              from the Gmail account itself.</div>
           </div>
-          <div class="col-4">
-            <label class="form-label fw-semibold">Port</label>
-            <input type="number" name="smtp_port" class="form-control" value="{{ smtp_port }}">
+          <div class="col-5">
+            <label class="form-label fw-semibold">From name</label>
+            <input type="text" name="email_from_name" class="form-control" value="{{ email_from_name }}"
+                   placeholder="Defaults to club name">
           </div>
         </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">SMTP username</label>
-          <input type="text" name="smtp_username" class="form-control" value="{{ smtp_username }}" autocomplete="off">
+
+        {# ── SMTP2GO ── #}
+        <div class="card mb-3">
+          <div class="card-header py-2 fw-semibold d-flex justify-content-between">
+            <span>SMTP2GO</span>
+            {% if smtp_password_set and smtp_username %}<span class="badge bg-success">configured</span>{% endif %}
+          </div>
+          <div class="card-body py-3">
+            <p class="text-muted small mb-2">
+              Works with SMTP2GO or any standard SMTP provider. Sending limits vary by plan —
+              see <a href="https://www.smtp2go.com/blog/know-your-sending-limits/"
+                 target="_blank" rel="noopener noreferrer">SMTP2GO Sending Limits: Every Cap,
+              Why It Exists, and How to Lift It</a>. Leave the password blank to keep the stored one.
+            </p>
+            <div class="row g-2 mb-2">
+              <div class="col-8">
+                <label class="form-label small fw-semibold mb-1">SMTP server</label>
+                <input type="text" name="smtp_host" class="form-control form-control-sm" value="{{ smtp_host }}">
+              </div>
+              <div class="col-4">
+                <label class="form-label small fw-semibold mb-1">Port</label>
+                <input type="number" name="smtp_port" class="form-control form-control-sm" value="{{ smtp_port }}">
+              </div>
+              <div class="col-6">
+                <label class="form-label small fw-semibold mb-1">Username</label>
+                <input type="text" name="smtp_username" class="form-control form-control-sm"
+                       value="{{ smtp_username }}" autocomplete="off">
+              </div>
+              <div class="col-6">
+                <label class="form-label small fw-semibold mb-1">Password</label>
+                <input type="password" name="smtp_password" class="form-control form-control-sm" autocomplete="off"
+                       placeholder="{{ '•••••••• (kept if blank)' if smtp_password_set else 'SMTP password' }}">
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">SMTP password</label>
-          <input type="password" name="smtp_password" class="form-control" autocomplete="off"
-                 placeholder="{{ '•••••••• (already set — leave blank to keep)' if smtp_password_set else 'Your SMTP2GO SMTP password' }}">
+
+        {# ── Mailgun ── #}
+        <div class="card mb-3">
+          <div class="card-header py-2 fw-semibold d-flex justify-content-between">
+            <span>Mailgun</span>
+            {% if mailgun_key_set and mailgun_domain %}<span class="badge bg-success">configured</span>{% endif %}
+          </div>
+          <div class="card-body py-3">
+            <p class="text-muted small mb-2">
+              Sends through Mailgun's API — suited to larger volumes. You need a Mailgun account
+              with a verified sending domain. Leave the API key blank to keep the stored one.
+            </p>
+            <div class="row g-2 mb-2">
+              <div class="col-7">
+                <label class="form-label small fw-semibold mb-1">Sending domain</label>
+                <input type="text" name="mailgun_domain" class="form-control form-control-sm"
+                       value="{{ mailgun_domain }}" placeholder="e.g. mg.yourclub.org" autocomplete="off">
+              </div>
+              <div class="col-5">
+                <label class="form-label small fw-semibold mb-1">Region</label>
+                <select name="mailgun_region" class="form-select form-select-sm">
+                  <option value="us" {% if mailgun_region != 'eu' %}selected{% endif %}>US (default)</option>
+                  <option value="eu" {% if mailgun_region == 'eu' %}selected{% endif %}>EU</option>
+                </select>
+              </div>
+              <div class="col-12">
+                <label class="form-label small fw-semibold mb-1">API key</label>
+                <input type="password" name="mailgun_api_key" class="form-control form-control-sm" autocomplete="off"
+                       placeholder="{{ '•••••••• (kept if blank)' if mailgun_key_set else 'Private API key from the Mailgun dashboard' }}">
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">From address</label>
-          <input type="email" name="email_from" class="form-control" value="{{ email_from }}"
-                 placeholder="e.g. club@yourdomain.com">
-          <div class="form-text">Must be a sender address/domain verified in your SMTP2GO account.</div>
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">From name</label>
-          <input type="text" name="email_from_name" class="form-control" value="{{ email_from_name }}"
-                 placeholder="Defaults to the club name">
+
+        {# ── Gmail ── #}
+        <div class="card mb-3">
+          <div class="card-header py-2 fw-semibold d-flex justify-content-between">
+            <span>Gmail</span>
+            {% if gmail_password_set and gmail_username %}<span class="badge bg-success">configured</span>{% endif %}
+          </div>
+          <div class="card-body py-3">
+            <p class="text-muted small mb-2">
+              Sends from a Gmail account (limit ≈500 recipients/day). Needs an
+              <strong>App Password</strong>, not your normal password: turn on 2-Step
+              Verification in your Google Account, then create one at
+              <a href="https://myaccount.google.com/apppasswords" target="_blank"
+                 rel="noopener noreferrer">myaccount.google.com/apppasswords</a>.
+              Leave it blank to keep the stored one.
+            </p>
+            <div class="row g-2 mb-2">
+              <div class="col-6">
+                <label class="form-label small fw-semibold mb-1">Gmail address</label>
+                <input type="email" name="gmail_username" class="form-control form-control-sm"
+                       value="{{ gmail_username }}" placeholder="club@gmail.com" autocomplete="off">
+              </div>
+              <div class="col-6">
+                <label class="form-label small fw-semibold mb-1">App password</label>
+                <input type="password" name="gmail_app_password" class="form-control form-control-sm" autocomplete="off"
+                       placeholder="{{ '•••••••• (kept if blank)' if gmail_password_set else '16-character app password' }}">
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <button type="submit" class="btn btn-primary">Save</button>
@@ -71,13 +158,18 @@
   </div>
 </div>
 
-{% if email_sending_enabled %}
-<div class="card shadow-sm border-0 mt-4" style="max-width:560px">
+{% if email_sending_enabled and configured_providers %}
+<div class="card shadow-sm border-0 mt-4" style="max-width:620px">
   <div class="card-header fw-semibold">Send a test email</div>
   <div class="card-body">
-    <p class="text-muted small mb-2">Save your SMTP details first, then send yourself a test to
-      confirm everything works before emailing the whole club.</p>
+    <p class="text-muted small mb-2">Save your details first, then send yourself a test from
+      each provider you plan to use.</p>
     <form method="post" action="/settings/email/test" class="d-flex gap-2">
+      <select name="provider" class="form-select" style="max-width:10rem">
+        {% for key, label in configured_providers %}
+        <option value="{{ key }}" {% if key == email_provider %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
       <input type="email" name="test_to" class="form-control" placeholder="you@example.com" required>
       <button type="submit" class="btn btn-outline-primary text-nowrap">Send test</button>
     </form>

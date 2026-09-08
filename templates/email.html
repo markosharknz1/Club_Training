@@ -8,7 +8,7 @@
 
 {% if not email_configured %}
 <div class="alert alert-warning">
-  Email isn't set up yet. Add your SMTP2GO details under
+  Email isn’t set up yet. Set up a provider (SMTP2GO, Mailgun or Gmail) under
   <a href="/settings/email" class="alert-link">⚙ Setup → Club Settings → Email</a>, then come back here.
 </div>
 {% endif %}
@@ -50,17 +50,30 @@
         Recipients — {{ email_map | length }} address{{ 'es' if email_map|length != 1 }}
       </div>
       {% if email_map %}
+      <div class="px-3 py-2 border-bottom d-flex align-items-center gap-2">
+        <input type="checkbox" class="form-check-input" id="recip-all" checked>
+        <label for="recip-all" class="small fw-semibold mb-0">Select all</label>
+        <span class="text-muted small ms-auto"><span id="recip-count">{{ email_map | length }}</span> selected</span>
+      </div>
       <div class="card-body p-0" style="max-height:260px;overflow-y:auto">
-        <table class="table table-sm mb-0" style="font-size:.85rem">
+        <table class="table table-sm table-hover mb-0" style="font-size:.85rem">
           <tbody>
             {% for email, names in email_map.items() %}
             <tr>
-              <td class="text-muted">{{ email }}</td>
-              <td>{{ names | join(', ') }}</td>
+              <td style="width:2rem" class="text-center">
+                <input type="checkbox" class="form-check-input recip-box" checked
+                       name="recipients" value="{{ email }}" form="composeForm"
+                       id="recip-{{ loop.index }}">
+              </td>
+              <td><label for="recip-{{ loop.index }}" class="mb-0 d-block" style="cursor:pointer">{{ names | join(', ') }}</label></td>
+              <td class="text-muted"><label for="recip-{{ loop.index }}" class="mb-0 d-block" style="cursor:pointer">{{ email }}</label></td>
             </tr>
             {% endfor %}
           </tbody>
         </table>
+      </div>
+      <div class="card-footer bg-transparent py-2 text-muted" style="font-size:.75rem">
+        Untick anyone who shouldn't get this email — only ticked addresses are sent to.
       </div>
       {% else %}
       <div class="card-body py-3">
@@ -84,28 +97,164 @@
     <div class="card shadow-sm border-0">
       <div class="card-header fw-semibold">Message</div>
       <div class="card-body">
-        <form method="post" action="/email/send"
-              onsubmit="return confirm('Send this email to {{ email_map | length }} address{{ 'es' if email_map|length != 1 }}?')">
+        <form method="post" action="/email/send" enctype="multipart/form-data" id="composeForm"
+              onsubmit="return prepareSend()">
           <input type="hidden" name="months" value="{{ months }}">
           <input type="hidden" name="session_id" value="{{ session_id or '' }}">
+          <input type="hidden" name="body" id="body-text">
+          <input type="hidden" name="body_html" id="body-html">
           <div class="mb-3">
             <label class="form-label fw-semibold">Subject <span class="text-danger">*</span></label>
             <input type="text" name="subject" class="form-control" required
                    placeholder="e.g. Upcoming junior tournament — 14 September">
           </div>
-          <div class="mb-3">
-            <label class="form-label fw-semibold">Message <span class="text-danger">*</span></label>
-            <textarea name="body" class="form-control" rows="9" required
-                      placeholder="Hi everyone,&#10;&#10;..."></textarea>
+
+          <label class="form-label fw-semibold mb-1">Message <span class="text-danger">*</span></label>
+          {# Editor toolbar #}
+          <div class="btn-toolbar border rounded-top px-2 py-1 gap-1 bg-light" style="border-bottom:0 !important">
+            <button type="button" class="btn btn-sm btn-outline-secondary fw-bold" onclick="fmt('bold')" title="Bold">B</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary fst-italic" onclick="fmt('italic')" title="Italic">I</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary text-decoration-underline" onclick="fmt('underline')" title="Underline">U</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="fmt('insertUnorderedList')" title="Bullet list">•≡</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="fmt('insertOrderedList')" title="Numbered list">1≡</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="makeHeading()" title="Heading">H</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="makeLink()" title="Link">🔗</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="fmt('removeFormat')" title="Clear formatting">✕fmt</button>
           </div>
-          <button type="submit" class="btn btn-primary"
-                  {% if not email_configured or not email_map %}disabled{% endif %}>
-            ✉ Send to {{ email_map | length }} address{{ 'es' if email_map|length != 1 }}
+          <div id="editor" contenteditable="true" class="form-control rounded-0 rounded-bottom mb-3"
+               style="min-height:220px;overflow-y:auto"
+               data-placeholder="Hi everyone,&#10;&#10;..."></div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Attachments</label>
+            <input type="file" name="attachments" id="attachments" class="form-control" multiple>
+            <div class="form-text">PDFs, images, any file — up to 10 MB in total.
+              Every recipient gets the same attachments.</div>
+            <div class="text-danger small d-none" id="att-error"></div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Also send to</label>
+            <input type="text" name="extra_recipients" id="extra-recipients" class="form-control"
+                   placeholder="Type any address — comma-separate for several" autocomplete="off">
+            <div class="form-text">Extra addresses beyond the ticked players.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">BCC a copy to</label>
+            <input type="email" name="bcc_copy" id="bcc-copy" class="form-control"
+                   placeholder="e.g. the club's own address" autocomplete="off">
+            <div class="form-text">Gets one copy of the email for the club's records. (Every
+              recipient already receives their own individual copy, so nobody sees this or
+              each other's addresses.)</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Send via</label>
+            <select name="provider" id="provider-select" class="form-select" style="max-width:220px">
+              {% for key, label in providers %}
+              <option value="{{ key }}" {% if key == default_provider %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">{% if providers | length > 1 %}Pick by volume — Gmail for a
+              handful, Mailgun for big sends.{% else %}The only provider configured — add more
+              in Settings → Email.{% endif %}</div>
+          </div>
+
+          <button type="submit" class="btn btn-primary" id="send-btn"
+                  {% if not email_configured %}disabled{% endif %}>
+            ✉ Send to <span id="send-count">{{ email_map | length }}</span>
+            address<span id="send-plural">{{ 'es' if email_map|length != 1 }}</span>
+            via <span id="send-provider"></span>
           </button>
         </form>
       </div>
     </div>
   </div>
 </div>
+
+<style>
+  #editor:empty::before { content: attr(data-placeholder); color:#6c757d; white-space:pre-line; }
+  #editor:focus { outline:none; border-color:#86b7fe; box-shadow:0 0 0 .25rem rgba(13,110,253,.25); }
+</style>
+
+<script>
+function fmt(cmd) {
+  document.getElementById('editor').focus();
+  document.execCommand(cmd, false, null);
+}
+function makeLink() {
+  const url = prompt('Link address (e.g. https://…):');
+  if (!url) return;
+  document.getElementById('editor').focus();
+  document.execCommand('createLink', false, url);
+}
+function makeHeading() {
+  document.getElementById('editor').focus();
+  document.execCommand('formatBlock', false, 'h3');
+}
+
+document.getElementById('attachments').addEventListener('change', function () {
+  const err = document.getElementById('att-error');
+  let total = 0;
+  for (const f of this.files) total += f.size;
+  if (total > 10 * 1024 * 1024) {
+    err.textContent = 'Those files add up to ' + (total / 1048576).toFixed(1)
+      + ' MB — the limit is 10 MB. Remove or shrink one.';
+    err.classList.remove('d-none');
+    this.value = '';
+  } else {
+    err.classList.add('d-none');
+  }
+});
+
+function recipientCount() {
+  let n = document.querySelectorAll('.recip-box:checked').length;
+  const extra = document.getElementById('extra-recipients').value;
+  n += extra.split(/[,;\s]+/).filter(x => x.includes('@')).length;
+  if (document.getElementById('bcc-copy').value.includes('@')) n += 1;
+  return n;
+}
+
+function providerLabel() {
+  const sel = document.getElementById('provider-select');
+  return sel && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex].text : '';
+}
+
+function refreshSendButton() {
+  const n = recipientCount();
+  const cnt = document.getElementById('recip-count');
+  if (cnt) cnt.textContent = document.querySelectorAll('.recip-box:checked').length;
+  document.getElementById('send-count').textContent = n;
+  document.getElementById('send-plural').textContent = n === 1 ? '' : 'es';
+  document.getElementById('send-provider').textContent = providerLabel();
+}
+
+document.querySelectorAll('.recip-box').forEach(b => b.addEventListener('change', () => {
+  const boxes = [...document.querySelectorAll('.recip-box')];
+  document.getElementById('recip-all').checked = boxes.every(x => x.checked);
+  refreshSendButton();
+}));
+const allBox = document.getElementById('recip-all');
+if (allBox) allBox.addEventListener('change', function () {
+  document.querySelectorAll('.recip-box').forEach(b => { b.checked = this.checked; });
+  refreshSendButton();
+});
+['extra-recipients', 'bcc-copy'].forEach(id =>
+  document.getElementById(id).addEventListener('input', refreshSendButton));
+document.getElementById('provider-select').addEventListener('change', refreshSendButton);
+refreshSendButton();
+
+function prepareSend() {
+  const ed = document.getElementById('editor');
+  const text = ed.innerText.trim();
+  if (!text) { alert('Write a message first.'); return false; }
+  const n = recipientCount();
+  if (!n) { alert('No recipients selected — tick at least one, or type an address.'); return false; }
+  document.getElementById('body-text').value = text;
+  document.getElementById('body-html').value = ed.innerHTML;
+  return confirm('Send this email to ' + n + ' address' + (n === 1 ? '' : 'es')
+                 + ' via ' + providerLabel() + '?');
+}
+</script>
 
 {% endblock %}
