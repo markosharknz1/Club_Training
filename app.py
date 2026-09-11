@@ -21,7 +21,7 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
 
-APP_VERSION = '1.7.1'
+APP_VERSION = '1.8.0'
 
 # ─── Branding ───────────────────────────────────────────────────────
 # Bundled club icons (static/icons/sports/<key>.svg — see LICENSE.md there).
@@ -3506,6 +3506,43 @@ def _unblock_bundle():
 
 if __name__ == '__main__':
     _unblock_bundle()
+
+    # First-run installer — the standalone exe only (running from source
+    # skips it). A downloaded folder that was already installed elsewhere
+    # just opens the installed copy.
+    if getattr(sys, 'frozen', False):
+        import setup_wizard
+        _installed_exe = setup_wizard.installed_elsewhere()
+        if _installed_exe:
+            setup_wizard.launch_detached(_installed_exe)
+            sys.exit(0)
+        if setup_wizard.first_run():
+            _res = _resource_dir()
+            _setup_flask = setup_wizard.build_setup_app(
+                os.path.join(_res, 'templates'), os.path.join(_res, 'static'))
+            _setup_port = _free_port()
+            threading.Thread(
+                target=lambda: _setup_flask.run(host='127.0.0.1', port=_setup_port,
+                                                debug=False, use_reloader=False),
+                daemon=True,
+            ).start()
+            _wait_for_server(_setup_port)
+            try:
+                import webview
+                webview.create_window('Club Training Setup',
+                                      f'http://127.0.0.1:{_setup_port}/setup',
+                                      js_api=setup_wizard.SetupWindowApi(),
+                                      width=720, height=760, min_size=(640, 600))
+                webview.start()
+            except Exception as _e:
+                print(f'  Setup window unavailable ({_e.__class__.__name__}: {_e}).')
+                print('  Opening setup in your default browser instead.\n')
+                webbrowser.open(f'http://localhost:{_setup_port}/setup')
+                threading.Event().wait()   # /api/install or /api/cancel exits the process
+            # Window closed without installing (or install handed over and
+            # exited already) — either way this process is done.
+            sys.exit(0)
+
     _tested_versions = ((3, 9), (3, 14))  # inclusive range this app has been tested against
     if not (_tested_versions[0] <= sys.version_info[:2] <= _tested_versions[1]):
         print(f'  Note: this app was built and tested on Python 3.12. You are running '

@@ -646,6 +646,33 @@ own machine and demo to other club members (e.g. "Carol").
     is being replaced on its `edge-launcher` branch (draft PR, unmerged); Club_Training uses
     folder mode which typically flags less — see the first CI release's scan for real numbers.
 
+40. **First-run installer (setup wizard) for the standalone exe** (user: "build a window that
+    LOOKS like an installer for first run", "give the option to say where to install, and
+    make [sure] not to install in the documents folder"). `setup_wizard.py` + `templates/
+    setup.html`, FROZEN EXE ONLY (run.bat/source/dev unaffected). First exe run with no
+    `.setup-complete` marker beside it → pywebview window "Club Training Setup" (tiny
+    standalone Flask app, NEVER touches the club DB): welcome, Install-to box (default
+    `C:\Apps\Club_Training`; `install_dir_problem()` REFUSES Documents (registry-resolved,
+    OneDrive-redirect aware), any `\OneDrive\` path, Temp, and non-absolute paths — the
+    note explains sync corrupts the live DB while daily backups still go to Documents),
+    native folder Browse via js_api (`SetupWindowApi.browse`), install-here link when the
+    current folder is acceptable, desktop-shortcut tickbox. Install = copytree with
+    `COPY_IGNORE` (never copies source badminton.db/backups/logs/marker; installing over an
+    existing install is an UPGRADE that keeps that club's data), dest marker "setup
+    completed …", source marker "installed-to=<dest>" (re-running the downloaded copy hands
+    over to the installed exe and exits), optional shortcut (WScript.Shell via powershell),
+    then `launch_detached(dest exe)` + `os._exit`. **Windowed-exe gotcha fixed live: Popen
+    in a no-console PyInstaller app MUST get DEVNULL std handles or the spawn silently
+    fails** (the installed copy "didn't launch" until then). Auto-launch may land on port
+    7434 if setup still holds 7433 — harmless, the app is port-agnostic. Non-frozen
+    (tests): finish/cancel only record state, never os._exit. CI: release.yml pre-seeds the
+    marker before the exe probe and DELETES it before zipping (shipping a marker would skip
+    setup for every club); pyinstaller commands (release.yml, build_exe.bat) carry
+    `--hidden-import setup_wizard`. **Any local exe smoke test must also pre-seed the
+    marker or it will meet the setup window.** Verified end-to-end with the real exe: setup
+    page, install via API, auto-launch from install dir with fresh DB, handover on
+    re-running the download. 23-check functional suite in the session scratchpad.
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

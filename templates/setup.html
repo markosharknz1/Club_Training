@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Club Training Setup</title>
+  <link rel="icon" href="/static/icons/sports/badminton.svg">
+  <link href="/static/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f4f6f9; }
+    .setup-header { background: #1a3a5c; color: #fff; }
+  </style>
+</head>
+<body>
+
+<div class="setup-header py-3 px-4 d-flex align-items-center gap-2 mb-4">
+  <img src="/static/icons/sports/badminton.svg" alt="" width="26" height="26"
+       style="filter:brightness(0) invert(1)">
+  <span class="fw-bold fs-5">Club Training Setup</span>
+</div>
+
+<div class="container" style="max-width:640px">
+
+  {# ── Welcome / choices ─────────────────────────────────────────── #}
+  <div id="pane-welcome">
+    <div class="card shadow-sm border-0 mb-3">
+      <div class="card-body p-4">
+        <h5 class="fw-bold mb-3">Welcome to Club Training</h5>
+        <p class="mb-2">This one-time setup gets everything ready. It will:</p>
+        <ol class="mb-3">
+          <li>Copy the app to the folder below</li>
+          <li>Create a desktop shortcut (optional)</li>
+          <li>Start Club Training — a fresh club database is created on first start</li>
+        </ol>
+        <p class="text-muted small mb-4">
+          Everything stays on this computer — no cloud, no accounts. See SECURITY.md
+          in the app folder for the full story.
+        </p>
+
+        <label class="form-label fw-semibold mb-1">Install to</label>
+        <div class="d-flex gap-2 mb-1">
+          <input type="text" id="install-dir" class="form-control" value="{{ default_dir }}"
+                 autocomplete="off" spellcheck="false">
+          <button type="button" class="btn btn-outline-secondary text-nowrap d-none"
+                  id="browse-btn" onclick="browse()">Browse…</button>
+        </div>
+        <div class="form-text mb-2">
+          Not your Documents folder or anywhere OneDrive syncs — sync services corrupt the
+          app's live database. (Daily <em>backups</em> still go to Documents automatically.)
+          Installing over an earlier Club Training install keeps that club's data.
+        </div>
+        <div class="text-danger small mb-3 d-none" id="dir-problem"></div>
+
+        {% if current_ok %}
+        <div class="form-text mb-3">
+          Or <a href="#" onclick="useHere(); return false">set up in the current folder</a>
+          ({{ current_dir }}) without copying anywhere.
+        </div>
+        {% endif %}
+
+        <div class="form-check mb-4">
+          <input class="form-check-input" type="checkbox" id="shortcut-box" checked>
+          <label class="form-check-label" for="shortcut-box">Create a desktop shortcut</label>
+        </div>
+
+        <div class="d-flex gap-2 justify-content-end">
+          <button type="button" class="btn btn-outline-secondary" onclick="cancelSetup()">Cancel</button>
+          <button type="button" class="btn btn-primary fw-semibold px-4" id="install-btn"
+                  onclick="install()">Install and start</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ── Progress / done ───────────────────────────────────────────── #}
+  <div id="pane-progress" class="d-none">
+    <div class="card shadow-sm border-0">
+      <div class="card-body p-4 text-center">
+        <h5 class="fw-bold mb-3" id="progress-title">Setting up Club Training…</h5>
+        <div class="progress mb-3" style="height:10px">
+          <div class="progress-bar progress-bar-striped progress-bar-animated w-100"></div>
+        </div>
+        <p class="text-muted small mb-0" id="progress-text">Copying the app…</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// Native folder picker only exists inside the app window (pywebview)
+window.addEventListener('pywebviewready', () => {
+  document.getElementById('browse-btn').classList.remove('d-none');
+});
+
+function browse() {
+  window.pywebview.api.browse().then(folder => {
+    if (folder) { document.getElementById('install-dir').value = folder; checkDir(); }
+  });
+}
+
+function useHere() {
+  document.getElementById('install-dir').value = {{ current_dir | tojson }};
+  checkDir();
+}
+
+function showProblem(msg) {
+  const el = document.getElementById('dir-problem');
+  if (msg) { el.textContent = msg; el.classList.remove('d-none'); }
+  else el.classList.add('d-none');
+}
+
+function checkDir() {
+  return fetch('/api/check', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({dir: document.getElementById('install-dir').value}),
+  }).then(r => r.json()).then(data => { showProblem(data.problem); return data.ok; });
+}
+document.getElementById('install-dir').addEventListener('change', checkDir);
+
+function cancelSetup() {
+  fetch('/api/cancel', {method: 'POST'}).finally(() => {
+    document.body.innerHTML = '<div class="p-5 text-center text-muted">Setup cancelled — you can close this window.</div>';
+  });
+}
+
+function install() {
+  const btn = document.getElementById('install-btn');
+  btn.disabled = true;
+  checkDir().then(ok => {
+    if (!ok) { btn.disabled = false; return; }
+    document.getElementById('pane-welcome').classList.add('d-none');
+    document.getElementById('pane-progress').classList.remove('d-none');
+    fetch('/api/install', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        dir: document.getElementById('install-dir').value,
+        shortcut: document.getElementById('shortcut-box').checked,
+      }),
+    }).then(r => r.json()).then(data => {
+      if (!data.ok) {
+        document.getElementById('pane-progress').classList.add('d-none');
+        document.getElementById('pane-welcome').classList.remove('d-none');
+        showProblem(data.error || 'Setup failed.');
+        btn.disabled = false;
+        return;
+      }
+      document.getElementById('progress-title').textContent = 'Setup complete';
+      document.getElementById('progress-text').textContent =
+        'Club Training is starting from ' + data.dest + ' — this window will be replaced in a moment.';
+    }).catch(() => {
+      // the setup process exits as the installed copy takes over; both
+      // fetch failure modes here just mean the handover already happened
+    });
+  });
+}
+</script>
+
+</body>
+</html>

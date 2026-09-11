@@ -43,11 +43,13 @@ jobs:
         run: python scripts/ci_smoke.py
 
       - name: Build standalone exe
-        run: pyinstaller --noconfirm --clean --windowed --name Club_Training --icon "static/icon.ico" --add-data "templates;templates" --add-data "static;static" --hidden-import webview.platforms.edgechromium --hidden-import webview.platforms.winforms app.py
+        run: pyinstaller --noconfirm --clean --windowed --name Club_Training --icon "static/icon.ico" --add-data "templates;templates" --add-data "static;static" --hidden-import webview.platforms.edgechromium --hidden-import webview.platforms.winforms --hidden-import setup_wizard app.py
 
       - name: Run the built exe and probe it
         shell: pwsh
         run: |
+          # pre-seed the first-run marker so the probe meets the app, not the installer
+          Set-Content "dist\Club_Training\.setup-complete" "ci probe"
           $p = Start-Process -FilePath "dist\Club_Training\Club_Training.exe" -PassThru
           $ok = $false
           foreach ($i in 1..30) {
@@ -62,6 +64,8 @@ jobs:
           # the probe run creates a fresh database - must not ship in the zip
           Remove-Item "dist\Club_Training\badminton.db" -Force -ErrorAction SilentlyContinue
           Remove-Item "dist\Club_Training\backups" -Recurse -Force -ErrorAction SilentlyContinue
+          # the marker must NOT ship - first run for a club must show setup
+          Remove-Item "dist\Club_Training\.setup-complete" -Force
 
       - name: Package zip and checksum
         shell: pwsh

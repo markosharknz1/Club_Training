@@ -19,6 +19,7 @@ pyinstaller --noconfirm --clean --windowed --name Club_Training ^
     --add-data "templates;templates" ^
     --add-data "static;static" ^
     --hidden-import webview.platforms.edgechromium ^
+    --hidden-import setup_wizard ^
     --hidden-import webview.platforms.winforms ^
     app.py
 
