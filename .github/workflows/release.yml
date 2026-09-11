@@ -1,0 +1,112 @@
+name: Release
+
+# Push a tag like v1.7.1 and this workflow does the whole release:
+# smoke test -> PyInstaller build -> run the built exe and probe it ->
+# zip + SHA-256 -> VirusTotal scan (if the VT_API_KEY secret is set) ->
+# GitHub release with RELEASE_NOTES.md as the body plus verification info.
+#
+# Release steps (from CLAUDE.md):
+#   1. bump APP_VERSION in app.py, write RELEASE_NOTES.md, commit, push
+#   2. git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Check APP_VERSION matches the tag
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          APP=$(python -c "import re; print(re.search(r\"APP_VERSION = '([^']+)'\", open('app.py', encoding='utf-8').read()).group(1))")
+          echo "tag=$TAG app.py=$APP"
+          test "$TAG" = "$APP" || { echo "APP_VERSION in app.py does not match the tag"; exit 1; }
+
+      - name: Smoke test (fresh database, key pages)
+        run: python scripts/ci_smoke.py
+
+      - name: Build standalone exe
+        run: pyinstaller --noconfirm --clean --windowed --name Club_Training --icon "static/icon.ico" --add-data "templates;templates" --add-data "static;static" --hidden-import webview.platforms.edgechromium --hidden-import webview.platforms.winforms app.py
+
+      - name: Run the built exe and probe it
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\Club_Training\Club_Training.exe" -PassThru
+          $ok = $false
+          foreach ($i in 1..30) {
+            Start-Sleep -Seconds 2
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:7433/settings/about" -TimeoutSec 3
+              if ($r.StatusCode -eq 200 -and $r.Content.Contains("${env:GITHUB_REF_NAME}".TrimStart('v'))) { $ok = $true; break }
+            } catch {}
+          }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok) { throw "built exe did not serve the app" }
+          # the probe run creates a fresh database - must not ship in the zip
+          Remove-Item "dist\Club_Training\badminton.db" -Force -ErrorAction SilentlyContinue
+          Remove-Item "dist\Club_Training\backups" -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Package zip and checksum
+        shell: pwsh
+        run: |
+          $zip = "Club_Training_${env:GITHUB_REF_NAME}.zip"
+          Compress-Archive -Path "dist\Club_Training" -DestinationPath $zip -Force
+          $h = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$h  $zip" | Out-File -Encoding ascii SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+
+      - name: VirusTotal scan
+        shell: bash
+        env:
+          VT_API_KEY: ${{ secrets.VT_API_KEY }}
+        run: |
+          if [ -z "$VT_API_KEY" ]; then
+            echo "_VirusTotal scan skipped — add a VT_API_KEY repository secret to enable it._" > vt_notes.md
+            exit 0
+          fi
+          python scripts/vt_scan.py "Club_Training_${GITHUB_REF_NAME}.zip" | tee vt_full.txt
+          awk '/--- paste into release notes ---/{f=1;next} f' vt_full.txt > vt_notes.md
+
+      - name: Compose release notes
+        shell: bash
+        run: |
+          if [ -f RELEASE_NOTES.md ]; then cp RELEASE_NOTES.md notes.md; else echo "Club Training ${GITHUB_REF_NAME}" > notes.md; fi
+          {
+            echo ""
+            echo "## Verify your download"
+            echo ""
+            echo '```'
+            cat SHA256SUMS.txt
+            echo '```'
+            cat vt_notes.md
+            echo ""
+            echo "_Built from source by GitHub Actions:_ commit \`${GITHUB_SHA}\` · [build log](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+          } >> notes.md
+          cat notes.md
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "Club_Training_${GITHUB_REF_NAME}.zip" SHA256SUMS.txt \
+            --title "Club Training $GITHUB_REF_NAME" \
+            --notes-file notes.md

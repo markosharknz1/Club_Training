@@ -624,6 +624,28 @@ own machine and demo to other club members (e.g. "Carol").
     visible. Zero recipients refused client- and server-side (9 more checks in
     test_email_recipients.py).
 
+39. **Trust & release pipeline (2026-09-11)** — user goal: show other clubs the app/repo is
+    safe. Added README.md, SECURITY.md (plain-English data-handling + verification page —
+    keep honest about PyInstaller false positives and SmartScreen), `scripts/vt_scan.py`
+    (VirusTotal scan by hash-or-upload; key ONLY via VT_API_KEY env/secret, never in repo),
+    `scripts/ci_smoke.py`, and GitHub Actions workflows: `ci.yml` (push → syntax + smoke) and
+    `release.yml`. **RELEASE PROCESS CHANGED — never `gh release create` by hand again.**
+    To release: bump APP_VERSION in app.py, write user-facing RELEASE_NOTES.md, commit+push,
+    then `git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`. The workflow verifies
+    APP_VERSION==tag, smoke-tests, builds the exe on windows-latest, RUNS the built exe and
+    probes :7433, strips the probe DB, zips as `Club_Training_vX.Y.Z.zip`, writes
+    SHA256SUMS.txt, VirusTotal-scans (needs `VT_API_KEY` repo secret — user adds it in the
+    GitHub UI themselves, never through chat), and creates the release with RELEASE_NOTES.md
+    + checksums + VT result + build-log link. v1.7.0's notes got a manual SHA-256 section.
+    Local `build_exe.bat` remains for the user's own machine only. Open decisions the user
+    parked: making the repo public (biggest free trust win; no kids' data in repo, needs a
+    licence file + final sweep) and code signing (Certum open-source cert ~€70/yr covers all
+    OPEN-SOURCE apps under one identity with shared SmartScreen reputation — policy requires
+    the apps be public; standard cert ~2x covers private too; the SmartScreen warning stays
+    until signed). Game Scheduler context: its PyInstaller onefile exe scored 7 VT flags and
+    is being replaced on its `edge-launcher` branch (draft PR, unmerged); Club_Training uses
+    folder mode which typically flags less — see the first CI release's scan for real numbers.
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

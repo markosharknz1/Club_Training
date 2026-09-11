@@ -1,0 +1,29 @@
+name: CI
+
+# Every push: syntax-check the app and boot it against a fresh database.
+
+on:
+  push:
+    branches: ['master']
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Syntax check
+        run: python -c "import ast; [ast.parse(open(f, encoding='utf-8').read(), f) for f in ('app.py', 'models.py', 'config.py')]; print('parse OK')"
+
+      - name: Smoke test (fresh database, key pages)
+        run: python scripts/ci_smoke.py
