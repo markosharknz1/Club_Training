@@ -12,19 +12,15 @@ own machine and demo to other club members (e.g. "Carol").
 - **GitHub:** private repo at https://github.com/markosharknz1/Club_Training (renamed from
   `BadmintonClub` via `gh repo rename`; `git remote origin` was updated automatically, branch
   `master`). Push only when the user explicitly asks ("push to github please").
-- **Run it:** `run.bat` (launches via `pythonw` — **windowless**, no console; closing the app
-  window stops everything). `run_debug.bat` is the same launch with a visible console for
-  troubleshooting. A "Club Training" desktop shortcut (pythonw target, app icon) exists on the
-  user's Desktop. The Flask server still runs internally on
-  `127.0.0.1` (no LAN/firewall exposure), but it's launched in a background thread and displayed
-  in a **native desktop window via `pywebview`** — no browser tab, no URL bar, no need for
-  Chrome/Edge/Firefox to be installed separately. It looks and feels like a real desktop app.
-  If `pywebview` isn't installed (e.g. `install.bat` wasn't run), it falls back to opening the
-  default browser instead, with a console message explaining why. On Windows, `pywebview` uses
-  the Edge WebView2 runtime, which ships with Windows 10/11 by default — nothing extra to install
-  there in practice.
-- **Install deps:** `install.bat` → `pip install -r requirements.txt`
-  (flask, flask-sqlalchemy, openpyxl, reportlab, requests, pywebview).
+- **Run it (dev):** `run.bat` (launches via `pythonw` — **windowless**, no console; closing the
+  app window stops everything). `run_debug.bat` is the same launch with a visible console for
+  troubleshooting. The Flask server runs internally on `127.0.0.1` (no LAN/firewall exposure) in
+  a background thread, displayed in an **Edge app window** (`native_window.py`,
+  `msedge --app=<url>` with its own profile dir — since v1.9.0; pywebview/WebView2 are GONE).
+  Browser-tab fallback if Edge is somehow missing. The packaged zip starts through `launch.py`
+  instead (installer gating + single-instance) — see feature entry 41.
+- **Install deps:** `pip install -r requirements.txt`
+  (flask, flask-sqlalchemy, sqlalchemy, openpyxl, reportlab, requests — pure Python, no pywebview).
 - **Database:** `badminton.db` (SQLite). **Never commit this** — `.gitignore` excludes `*.db*`.
   It contains real kids' personal data (names, guardians, Medicare numbers).
 
@@ -673,6 +669,45 @@ own machine and demo to other club members (e.g. "Carol").
     page, install via API, auto-launch from install dir with fresh DB, handover on
     re-running the download. 23-check functional suite in the session scratchpad.
 
+41. **v1.9.0 — the exe is GONE: zip = app source + signed python.org runtime + Edge app
+    window** (user: "Is there any way of making this not an .exe to stop defender smart
+    screen/app control entirely?" — same cure as Game Scheduler v1.0.13). PyInstaller,
+    pywebview, pythonnet, WebView2 installer, vendor_wheels/, install.bat, build_exe.bat
+    all removed. The zip now holds: readable `.py` source; `lib\` = pip `--target` deps
+    forced PURE Python (`scripts/build_dist.py`: Pillow + greenlet never shipped — PDFs
+    are text-only platypus, no SQLAlchemy asyncio; optional accelerator `.pyd`s deleted
+    (markupsafe/sqlalchemy fall back cleanly); **charset_normalizer is mypyc-COMPILED so
+    its .pyd must NOT just be deleted — build_dist reinstalls it `--no-binary` as pure**);
+    `python\` = official embeddable CPython 3.12.10 (URL+SHA256 pinned in build_dist.py,
+    `._pth` rewritten to `python312.zip/./../..\lib`, site off); `Club Training.cmd` (the
+    ONLY script — `start "" pythonw.exe launch.py`; pythonw is windowless, no conhost
+    needed). `launch.py` = packaged entry: MOTW strip → `installed-to=` handover →
+    first-run setup → run app; `native_window.py` opens `msedge --app=<url>` with its own
+    profile dir (`.edge-app-profile` / `.edge-setup-profile`, `--disable-sync
+    --disable-features=msImplicitSignin,msSyncPromo`); closing the window (proc.wait)
+    stops the server. **Single instance**: `logs\app.port` + `/__alive` route (in
+    create_app) — relaunch just opens another Edge window on the running server (Edge
+    hands off to the live profile process and exits). Setup wizard survives with dest-DIR
+    semantics (`launch_installed(dest)` spawns dest `python\pythonw.exe launch.py`;
+    installed_elsewhere checks python\pythonw.exe+launch.py; NO os._exit/sys.frozen — the
+    state dict gained an `event` launch.py waits on; SetupWindowApi/native Browse deleted,
+    textbox only); upgrade over a v1.8.0 folder DELETES `Club_Training.exe`/`_internal`
+    (`_remove_old_layout`) and the release notes tell upgraders to re-tick the shortcut
+    box (old .lnk targeted the deleted exe; new .lnk targets pythonw + launch.py + icon.ico).
+    `sys.frozen`/_MEIPASS gone everywhere (config.py, _resource_dir). release.yml: build
+    via build_dist.py, **new step fails the release if any shipped exe/dll/pyd isn't
+    Authenticode-Valid**, probe uses env `CLUB_TRAINING_NO_WINDOW=1` + `CLUB_TRAINING_PORT
+    =7433` against `python\pythonw.exe launch.py` (still pre-seeds/removes the marker; also
+    rm logs/ + __pycache__ before zipping). ci_smoke now also proves xlsx export + a
+    reportlab platypus PDF build work WITHOUT Pillow. Dev unchanged: run.bat/`python
+    app.py` (app.py __main__ now opens the Edge window itself, browser fallback). Local
+    live e2e passed: headless probe, setup window (screenshot), API install, auto-launch,
+    single pythonw after re-run handover, window-close stops server + removes port file;
+    all 31 binaries in python\ verified `Valid` signatures, zero binaries elsewhere
+    (~58 MB folder). 29-check wizard suite in session scratchpad. **SAC still untested on
+    a real Smart-App-Control machine — README says Unblock the zip first (same caveat as
+    Game Scheduler).**
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually
@@ -732,10 +767,11 @@ Linux cloud sandbox cloned from GitHub. Rules for those sessions:
 - **Push to a branch, not `master`.** Remote changes can't be verified against the real database
   or the real Windows machine, so they're "proposed until the user pulls and runs them at home."
   The user merges (or asks for a merge) and then `git pull`s in `C:\Club_Training`.
-- **Verify with the Flask test client** (same as local practice) — `pywebview` won't open a
-  window in a sandbox, and that's fine; the entry-point fallback and all routes work headless.
-- **Can't be tested remotely** (write the code, flag it for at-home verification): the pywebview
-  desktop window itself, `install.bat`/WebView2 behaviour, Square Terminal hardware, printing.
+- **Verify with the Flask test client** (same as local practice) — no desktop window opens in a
+  sandbox, and that's fine; all routes work headless.
+- **Can't be tested remotely** (write the code, flag it for at-home verification): the Edge app
+  window / launch.py / setup-wizard flow, `scripts/build_dist.py`'s assembled zip on real
+  Windows, Square Terminal hardware, printing.
 - Linux is case-sensitive and uses `/` paths — the app code is already portable, keep it that way.
 
 ## Resuming after a context reset

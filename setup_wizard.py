@@ -1,22 +1,24 @@
 """
-First-run installer for the standalone Club_Training.exe.
+First-run installer for the packaged (zip) copy of Club Training.
 
 The zip can be extracted anywhere — including places the live database must
 never live (Documents / OneDrive, where sync corrupts SQLite). So the first
-run of the exe shows a small setup window in the app's own native window:
-where to install (default C:\\Apps\\Club_Training; Documents/OneDrive/Temp
-are refused with an explanation), a desktop-shortcut tickbox, then it copies
-the app there, and starts the installed copy.
+run shows a small setup window: where to install (default
+C:\\Apps\\Club_Training; Documents/OneDrive/Temp are refused with an
+explanation), a desktop-shortcut tickbox, then it copies the app there and
+starts the installed copy. launch.py owns the window and process lifecycle;
+this module is the Flask app + install logic only.
 
-Markers (`.setup-complete` beside the exe):
+Markers (`.setup-complete` beside launch.py):
   - installed copy:  "setup completed <timestamp>"
   - the folder setup was RUN from (the download): "installed-to=<path>", so
     double-clicking the downloaded copy again just opens the installed app.
 
 Installing into a folder that already holds an install is an upgrade: app
-files are refreshed, `badminton.db` and `backups` there are never touched.
+files are refreshed, `badminton.db` and `backups` there are never touched
+(leftovers from the old .exe-based layout are cleaned up).
 
-Only the frozen exe ever sees this — running from source (run.bat / dev)
+Only the packaged copy ever sees this — running from source (run.bat / dev)
 skips it entirely.
 """
 import os
@@ -36,7 +38,12 @@ MARKER_NAME = '.setup-complete'
 # transient files. badminton.db in the SOURCE is also never copied — a fresh
 # install creates its own, and an upgrade must keep the destination's.
 COPY_IGNORE = shutil.ignore_patterns(
-    'badminton.db*', 'backups', MARKER_NAME, 'logs', '*.log')
+    'badminton.db*', 'backups', MARKER_NAME, 'logs', '*.log',
+    '.edge-app-profile', '.edge-setup-profile', '__pycache__')
+
+# Files/folders from the old PyInstaller-exe layout (v1.8.0 and earlier)
+# that an upgrade should clear out of the destination.
+OLD_LAYOUT = ('Club_Training.exe', '_internal')
 
 
 def _marker_path(base=None):
@@ -48,8 +55,8 @@ def first_run():
 
 
 def installed_elsewhere():
-    """The exe path to hand over to when THIS folder was only the download
-    that setup installed from — else None."""
+    """The install folder to hand over to when THIS folder was only the
+    download that setup installed from — else None."""
     try:
         with open(_marker_path(), 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
@@ -59,9 +66,10 @@ def installed_elsewhere():
     if not m:
         return None
     dest = os.path.normpath(m.group(1).strip())
-    exe = os.path.join(dest, 'Club_Training.exe')
-    if dest.lower() != os.path.normpath(config.BASE_DIR).lower() and os.path.exists(exe):
-        return exe
+    if (dest.lower() != os.path.normpath(config.BASE_DIR).lower()
+            and os.path.exists(os.path.join(dest, 'python', 'pythonw.exe'))
+            and os.path.exists(os.path.join(dest, 'launch.py'))):
+        return dest
     return None
 
 
@@ -109,7 +117,7 @@ def install_dir_problem(path):
 
 def perform_install(dest, make_shortcut):
     """Copy the app to `dest`, write both markers, optionally create a
-    desktop shortcut. Returns the destination exe path (may be this very
+    desktop shortcut. Returns the destination folder (may be this very
     folder when dest == the current folder)."""
     src = os.path.normpath(config.BASE_DIR)
     dest = os.path.normpath(os.path.abspath(dest))
@@ -123,6 +131,7 @@ def perform_install(dest, make_shortcut):
             raise RuntimeError(
                 'Could not copy the app — if Club Training is already running '
                 f'from {dest}, close it first and run setup again. ({e})')
+        _remove_old_layout(dest)
         with open(_marker_path(dest), 'w', encoding='utf-8') as f:
             f.write(stamp + '\n')
         # remember where it went, so this downloaded copy hands over next time
@@ -134,19 +143,38 @@ def perform_install(dest, make_shortcut):
 
     if make_shortcut:
         _create_desktop_shortcut(dest)
-    return os.path.join(dest, 'Club_Training.exe')
+    return dest
+
+
+def _remove_old_layout(dest):
+    """Upgrading over a v1.8.0-or-earlier install: clear the PyInstaller
+    exe and its _internal folder so the old (unsigned) binary doesn't
+    linger beside the new layout. Scoped strictly to known names in dest."""
+    for name in OLD_LAYOUT:
+        target = os.path.join(dest, name)
+        try:
+            if os.path.isdir(target):
+                shutil.rmtree(target)
+            elif os.path.exists(target):
+                os.remove(target)
+        except OSError:
+            pass  # a locked leftover is harmless — never fail the install
 
 
 def _create_desktop_shortcut(dest):
-    """Best-effort — never blocks the install over a shortcut."""
-    exe = os.path.join(dest, 'Club_Training.exe')
+    """Best-effort — never blocks the install over a shortcut. Targets the
+    bundled (signed) pythonw.exe running launch.py."""
+    pythonw = os.path.join(dest, 'python', 'pythonw.exe')
+    launch = os.path.join(dest, 'launch.py')
+    icon = os.path.join(dest, 'static', 'icon.ico')
     script = (
         "$s = (New-Object -ComObject WScript.Shell)."
         "CreateShortcut([System.IO.Path]::Combine("
         "[Environment]::GetFolderPath('Desktop'), 'Club Training.lnk')); "
-        f"$s.TargetPath = '{exe}'; "
+        f"$s.TargetPath = '{pythonw}'; "
+        f"$s.Arguments = '\"{launch}\"'; "
         f"$s.WorkingDirectory = '{dest}'; "
-        f"$s.IconLocation = '{exe}'; "
+        f"$s.IconLocation = '{icon}'; "
         "$s.Description = 'Club Training'; $s.Save()")
     try:
         subprocess.run(['powershell', '-NoProfile', '-Command', script],
@@ -156,11 +184,15 @@ def _create_desktop_shortcut(dest):
         pass
 
 
-def launch_detached(exe):
-    # In a windowed (no-console) exe the std handles are invalid — Popen must
-    # be given explicit DEVNULL handles or it can fail to spawn at all.
+def launch_installed(dest):
+    """Start the installed copy, fully detached from this process.
+
+    Explicit DEVNULL std handles: under pythonw.exe the standard handles
+    are invalid and Popen can fail to spawn at all without them.
+    """
+    pythonw = os.path.join(dest, 'python', 'pythonw.exe')
     subprocess.Popen(
-        [exe], cwd=os.path.dirname(exe), close_fds=True,
+        [pythonw, os.path.join(dest, 'launch.py')], cwd=dest, close_fds=True,
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
@@ -168,13 +200,16 @@ def launch_detached(exe):
 
 def build_setup_app(template_folder, static_folder):
     """A tiny standalone Flask app for the setup window — deliberately does
-    NOT touch the club database at all."""
+    NOT touch the club database at all. The caller (launch.py) watches
+    `setup_state`: `event` is set once `result` is 'installed' (with `dest`
+    filled in) or 'cancelled', and the caller then launches the installed
+    copy and closes the window."""
     from flask import Flask, jsonify, render_template, request
 
     setup_app = Flask('club_training_setup',
                       template_folder=template_folder,
                       static_folder=static_folder)
-    state = {'result': None}   # 'launched' once the installed copy is started
+    state = {'result': None, 'dest': None, 'event': threading.Event()}
 
     @setup_app.route('/')
     @setup_app.route('/setup')
@@ -199,50 +234,25 @@ def build_setup_app(template_folder, static_folder):
         if problem:
             return jsonify(ok=False, error=problem)
         try:
-            exe = perform_install(dest, bool(data.get('shortcut')))
+            installed = perform_install(dest, bool(data.get('shortcut')))
         except (RuntimeError, OSError) as e:
             return jsonify(ok=False, error=str(e))
 
         def _finish():
-            state['result'] = 'launched'
-            # Outside the frozen exe (tests, dev) just record the outcome —
-            # never kill the calling process.
-            if getattr(sys, 'frozen', False):
-                try:
-                    launch_detached(exe)
-                finally:
-                    os._exit(0)
+            state['dest'] = installed
+            state['result'] = 'installed'
+            state['event'].set()
 
-        # reply first, then start the installed copy and bow out
+        # reply first (so the page can show "setup complete"), then signal
         threading.Timer(1.2, _finish).start()
-        return jsonify(ok=True, dest=os.path.dirname(exe))
+        return jsonify(ok=True, dest=installed)
 
     @setup_app.route('/api/cancel', methods=['POST'])
     def api_cancel():
         state['result'] = 'cancelled'
-        if getattr(sys, 'frozen', False):
-            threading.Timer(0.3, lambda: os._exit(0)).start()
+        state['event'].set()
         return jsonify(ok=True)
 
     setup_app.setup_state = state
 
     return setup_app
-
-
-class SetupWindowApi:
-    """js_api for the pywebview setup window — native folder Browse."""
-
-    def browse(self):
-        try:
-            import webview
-            win = webview.windows[0]
-            picked = win.create_file_dialog(webview.FOLDER_DIALOG)
-            if picked:
-                folder = picked[0] if isinstance(picked, (list, tuple)) else picked
-                # picking e.g. C:\Apps means "put the app folder in there"
-                if os.path.basename(folder).lower() not in ('club_training', 'club training'):
-                    folder = os.path.join(folder, 'Club_Training')
-                return folder
-        except Exception:
-            pass
-        return None

@@ -21,7 +21,7 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
 
-APP_VERSION = '1.8.0'
+APP_VERSION = '1.9.0'
 
 # ─── Branding ───────────────────────────────────────────────────────
 # Bundled club icons (static/icons/sports/<key>.svg — see LICENSE.md there).
@@ -109,12 +109,9 @@ def _backup_database(keep=30):
 
 
 def _resource_dir():
-    """Where bundled read-only assets (templates/, static/) live. In a
-    PyInstaller build they're unpacked to sys._MEIPASS; in normal runs
-    they sit next to this file. The database is separate — it always
-    lives next to the exe/script (config.BASE_DIR) so data persists."""
-    if getattr(sys, 'frozen', False):
-        return sys._MEIPASS
+    """Where bundled read-only assets (templates/, static/) live — next to
+    this file, both in the packaged zip and running from source. The
+    database is separate (config.BASE_DIR / DB_PATH) so data persists."""
     return os.path.dirname(os.path.abspath(__file__))
 
 
@@ -128,6 +125,12 @@ def create_app():
     app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{config.DB_PATH}'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     db.init_app(app)
+
+    @app.route('/__alive')
+    def _alive():
+        # launch.py's single-instance check — confirms the process on a
+        # remembered port really is this app before reusing it
+        return jsonify(app='club-training', version=APP_VERSION)
 
     with app.app_context():
         db.create_all()
@@ -3486,63 +3489,10 @@ def _wait_for_server(port, timeout=5):
     return False
 
 
-def _unblock_bundle():
-    """Strip Windows 'downloaded from the internet' marks (Zone.Identifier
-    streams) from every bundled file. When the app is distributed as a zip
-    (e.g. GitHub Releases), Windows tags the extracted files as untrusted and
-    .NET then refuses to load our bundled DLLs — crashing the native window
-    with 'Failed to resolve Python.Runtime.Loader.Initialize'. Clearing the
-    marks up front makes a downloaded copy behave like a locally built one."""
-    if not getattr(sys, 'frozen', False):
-        return
-    base = os.path.dirname(sys.executable)
-    for root, _dirs, files in os.walk(base):
-        for fn in files:
-            try:
-                os.remove(os.path.join(root, fn) + ':Zone.Identifier')
-            except OSError:
-                pass  # no mark on this file — the normal case
-
-
 if __name__ == '__main__':
-    _unblock_bundle()
-
-    # First-run installer — the standalone exe only (running from source
-    # skips it). A downloaded folder that was already installed elsewhere
-    # just opens the installed copy.
-    if getattr(sys, 'frozen', False):
-        import setup_wizard
-        _installed_exe = setup_wizard.installed_elsewhere()
-        if _installed_exe:
-            setup_wizard.launch_detached(_installed_exe)
-            sys.exit(0)
-        if setup_wizard.first_run():
-            _res = _resource_dir()
-            _setup_flask = setup_wizard.build_setup_app(
-                os.path.join(_res, 'templates'), os.path.join(_res, 'static'))
-            _setup_port = _free_port()
-            threading.Thread(
-                target=lambda: _setup_flask.run(host='127.0.0.1', port=_setup_port,
-                                                debug=False, use_reloader=False),
-                daemon=True,
-            ).start()
-            _wait_for_server(_setup_port)
-            try:
-                import webview
-                webview.create_window('Club Training Setup',
-                                      f'http://127.0.0.1:{_setup_port}/setup',
-                                      js_api=setup_wizard.SetupWindowApi(),
-                                      width=720, height=760, min_size=(640, 600))
-                webview.start()
-            except Exception as _e:
-                print(f'  Setup window unavailable ({_e.__class__.__name__}: {_e}).')
-                print('  Opening setup in your default browser instead.\n')
-                webbrowser.open(f'http://localhost:{_setup_port}/setup')
-                threading.Event().wait()   # /api/install or /api/cancel exits the process
-            # Window closed without installing (or install handed over and
-            # exited already) — either way this process is done.
-            sys.exit(0)
-
+    # Running from source (run.bat / python app.py) — the packaged zip
+    # starts through launch.py instead, which adds the first-run installer
+    # and single-instance handling on top of the same server.
     _tested_versions = ((3, 9), (3, 14))  # inclusive range this app has been tested against
     if not (_tested_versions[0] <= sys.version_info[:2] <= _tested_versions[1]):
         print(f'  Note: this app was built and tested on Python 3.12. You are running '
@@ -3561,23 +3511,14 @@ if __name__ == '__main__':
     server_thread.start()
     _wait_for_server(port)
 
-    with app.app_context():
-        club_name = Setting.get('club_name', 'Club Training')
-    window_title = (f'Club Training — {club_name}'
-                    if club_name and club_name != 'Club Training'
-                    else 'Club Training')
-
-    try:
-        import webview
-        webview.create_window(window_title, f'http://127.0.0.1:{port}',
-                              width=1280, height=850, min_size=(1000, 650))
-        webview.start()
-    except Exception as e:
-        # Never die with an error dialog just because the native window
-        # couldn't start — the app itself is fine, so serve it in the
-        # default browser instead.
-        print(f'  Desktop window unavailable ({e.__class__.__name__}: {e}).')
-        print('  Falling back to your default browser.\n')
+    import native_window
+    if native_window.find_edge():
+        _win = native_window.open_app_window(
+            f'http://127.0.0.1:{port}',
+            os.path.join(config.BASE_DIR, '.edge-app-profile'))
+        _win.wait()   # window closed -> stop the server
+    else:
+        print('  Microsoft Edge not found — opening in your default browser.\n')
         webbrowser.open(f'http://localhost:{port}')
         print(f'  Club Training running at http://localhost:{port}')
         server_thread.join()

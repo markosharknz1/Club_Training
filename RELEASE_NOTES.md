@@ -1,14 +1,34 @@
-# What's new
+# Club Training v1.9.0
 
-**First run is now a proper setup.** Double-clicking `Club_Training.exe` for the first time opens a small setup window instead of dropping you wherever the zip was extracted:
+## No more `.exe` — no more Windows warnings
 
-- Choose **where to install** (default `C:\Apps\Club_Training`, with Browse). Setup refuses the Documents folder and anything OneDrive syncs — sync services corrupt the app's live database. (Your daily *backups* still go to Documents automatically.)
-- Optional **desktop shortcut**.
-- Setup copies the app to the chosen folder and starts it from there. Running the downloaded copy again later just opens your installed app.
+The app is no longer packaged as an executable. The zip now contains the
+app as **readable Python source** plus the **official python.org runtime**
+(signed by the Python Software Foundation) — the only program Windows ever
+runs is that signed runtime, so there is **no SmartScreen "Windows protected
+your PC" screen and nothing for antivirus engines to false-flag**. The app's
+window is Microsoft Edge in app mode (already on every Windows PC); it looks
+and works exactly as before.
 
-**Upgrades got easier too:** installing over an existing Club Training folder refreshes the app and **keeps that club's database and backups untouched** — no more copying `badminton.db` by hand.
+## Installing
 
-## Install / update
+1. Download the zip, right-click it → Properties → tick **Unblock** → OK.
+2. Extract anywhere and double-click **`Club Training.cmd`**.
+3. The setup window asks where to install (default `C:\Apps\Club_Training`,
+   never Documents/OneDrive) and offers a desktop shortcut, then starts the
+   app.
 
-1. Download `Club_Training_v1.8.0.zip` below and unzip anywhere. No Python or internet needed.
-2. Double-click `Club_Training.exe` and follow the setup window. **Updating?** Point "Install to" at your existing Club Training folder — your data is kept.
+## Upgrading from v1.8.0 or earlier
+
+Run the new `Club Training.cmd` and point **Install to** at your existing
+Club Training folder — your database and backups are kept, the app files are
+refreshed, and the old `Club_Training.exe` is cleaned up. **Tick the desktop
+shortcut box** so your shortcut points at the new app (the old one pointed at
+the removed exe).
+
+## Also in this release
+
+- Opening the app while it's already running now just brings up a window on
+  the running copy instead of starting a second one.
+- The release build now verifies every binary in the zip is
+  Authenticode-signed before publishing.

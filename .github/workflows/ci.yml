@@ -23,7 +23,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Syntax check
-        run: python -c "import ast; [ast.parse(open(f, encoding='utf-8').read(), f) for f in ('app.py', 'models.py', 'config.py')]; print('parse OK')"
+        run: python -c "import ast; [ast.parse(open(f, encoding='utf-8').read(), f) for f in ('app.py', 'models.py', 'config.py', 'setup_wizard.py', 'native_window.py', 'launch.py', 'scripts/build_dist.py')]; print('parse OK')"
 
       - name: Smoke test (fresh database, key pages)
         run: python scripts/ci_smoke.py

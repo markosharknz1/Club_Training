@@ -26,3 +26,9 @@ Thumbs.db
 # Editor
 .vscode/
 *.swp
+
+# App runtime state (packaged copy)
+logs/
+.edge-app-profile/
+.edge-setup-profile/
+.setup-complete

@@ -38,11 +38,9 @@
         </p>
 
         <label class="form-label fw-semibold mb-1">Install to</label>
-        <div class="d-flex gap-2 mb-1">
+        <div class="mb-1">
           <input type="text" id="install-dir" class="form-control" value="{{ default_dir }}"
                  autocomplete="off" spellcheck="false">
-          <button type="button" class="btn btn-outline-secondary text-nowrap d-none"
-                  id="browse-btn" onclick="browse()">Browse…</button>
         </div>
         <div class="form-text mb-2">
           Not your Documents folder or anywhere OneDrive syncs — sync services corrupt the
@@ -88,17 +86,6 @@
 </div>
 
 <script>
-// Native folder picker only exists inside the app window (pywebview)
-window.addEventListener('pywebviewready', () => {
-  document.getElementById('browse-btn').classList.remove('d-none');
-});
-
-function browse() {
-  window.pywebview.api.browse().then(folder => {
-    if (folder) { document.getElementById('install-dir').value = folder; checkDir(); }
-  });
-}
-
 function useHere() {
   document.getElementById('install-dir').value = {{ current_dir | tojson }};
   checkDir();

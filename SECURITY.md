@@ -38,17 +38,26 @@ includes:
   download provably matches the code in this repository, with the build log
   linked from every release.
 
-**About antivirus false positives:** the app is packaged with PyInstaller
-(which bundles the Python runtime into `Club_Training.exe`). A small number of
-lesser-known antivirus engines heuristically flag *all* PyInstaller apps.
-What matters is that the major engines (Microsoft, Kaspersky, Bitdefender,
-ESET, etc.) report it clean — check the VirusTotal link on any release.
+## What's actually in the zip
 
-**About the Windows SmartScreen warning:** the first time you run the app,
-Windows may show "Windows protected your PC" because the app is not
-code-signed (signing certificates cost money clubs don't need to spend).
-Click *More info → Run anyway*. The checksum and VirusTotal steps above are
-how you satisfy yourself before doing so.
+- **The app as readable Python source** (`app.py` and friends, plus its
+  open-source libraries in `lib\`) — nothing is compiled or obfuscated, so
+  anyone can inspect exactly what runs.
+- **The official Python runtime** from python.org in `python\` — every
+  `.exe`/`.dll` in the zip is Authenticode-signed by the Python Software
+  Foundation, and the release build verifies this and fails if anything
+  unsigned slips in. We ship no executable of our own at all.
+- **One small script**, `Club Training.cmd`, whose only job is to start the
+  signed `pythonw.exe` with the app.
+- The app's window is Microsoft Edge (already on your PC, signed by
+  Microsoft) in app mode — no embedded browser is bundled.
+
+Because there is no unsigned program to run, Windows SmartScreen has nothing
+to warn about, and the PyInstaller-style antivirus false positives that
+affect many packaged Python apps don't apply. If Windows' stricter **Smart
+App Control** is enabled on your machine, right-click the downloaded zip →
+Properties → **Unblock** before extracting (the install step already says
+this).
 
 ## Recommendations for club machines
 

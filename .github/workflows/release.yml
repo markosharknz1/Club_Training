@@ -1,9 +1,14 @@
 name: Release
 
-# Push a tag like v1.7.1 and this workflow does the whole release:
-# smoke test -> PyInstaller build -> run the built exe and probe it ->
+# Push a tag like v1.9.0 and this workflow does the whole release:
+# smoke test -> assemble the zip (app source + pure-Python deps + the
+# official python.org embeddable runtime) -> run the packaged copy and
+# probe it -> verify every shipped binary is Authenticode-signed ->
 # zip + SHA-256 -> VirusTotal scan (if the VT_API_KEY secret is set) ->
 # GitHub release with RELEASE_NOTES.md as the body plus verification info.
+#
+# There is no PyInstaller and no exe of ours any more — the only binaries
+# in the zip are python.org's own signed files (see scripts/build_dist.py).
 #
 # Release steps (from CLAUDE.md):
 #   1. bump APP_VERSION in app.py, write RELEASE_NOTES.md, commit, push
@@ -29,7 +34,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt
 
       - name: Check APP_VERSION matches the tag
         shell: bash
@@ -42,15 +47,25 @@ jobs:
       - name: Smoke test (fresh database, key pages)
         run: python scripts/ci_smoke.py
 
-      - name: Build standalone exe
-        run: pyinstaller --noconfirm --clean --windowed --name Club_Training --icon "static/icon.ico" --add-data "templates;templates" --add-data "static;static" --hidden-import webview.platforms.edgechromium --hidden-import webview.platforms.winforms --hidden-import setup_wizard app.py
+      - name: Assemble the distributable folder
+        run: python scripts/build_dist.py
 
-      - name: Run the built exe and probe it
+      - name: Verify every shipped binary is signed
+        shell: pwsh
+        run: |
+          $sigs = Get-ChildItem "dist\Club_Training" -Recurse -Include *.exe,*.dll,*.pyd | Get-AuthenticodeSignature
+          $sigs | Group-Object Status | ForEach-Object { Write-Host "$($_.Name): $($_.Count)" }
+          $bad = $sigs | Where-Object Status -ne 'Valid'
+          if ($bad) { $bad | ForEach-Object { Write-Host "UNSIGNED: $($_.Path)" }; throw "unsigned binaries in the zip" }
+
+      - name: Run the packaged copy and probe it
         shell: pwsh
         run: |
           # pre-seed the first-run marker so the probe meets the app, not the installer
           Set-Content "dist\Club_Training\.setup-complete" "ci probe"
-          $p = Start-Process -FilePath "dist\Club_Training\Club_Training.exe" -PassThru
+          $env:CLUB_TRAINING_NO_WINDOW = '1'
+          $env:CLUB_TRAINING_PORT = '7433'
+          $p = Start-Process -FilePath "dist\Club_Training\python\pythonw.exe" -ArgumentList '"dist\Club_Training\launch.py"' -WorkingDirectory "dist\Club_Training" -PassThru
           $ok = $false
           foreach ($i in 1..30) {
             Start-Sleep -Seconds 2
@@ -60,10 +75,12 @@ jobs:
             } catch {}
           }
           Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-          if (-not $ok) { throw "built exe did not serve the app" }
-          # the probe run creates a fresh database - must not ship in the zip
+          if (-not $ok) { throw "packaged copy did not serve the app" }
+          # the probe run creates runtime state - none of it may ship in the zip
           Remove-Item "dist\Club_Training\badminton.db" -Force -ErrorAction SilentlyContinue
           Remove-Item "dist\Club_Training\backups" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item "dist\Club_Training\logs" -Recurse -Force -ErrorAction SilentlyContinue
+          Get-ChildItem "dist\Club_Training" -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
           # the marker must NOT ship - first run for a club must show setup
           Remove-Item "dist\Club_Training\.setup-complete" -Force
 

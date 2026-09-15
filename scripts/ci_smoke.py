@@ -45,6 +45,22 @@ for url in pages:
 r = client.get('/settings/about')
 check('about page shows APP_VERSION', APP_VERSION.encode() in r.data)
 
+# The packaged zip deliberately ships WITHOUT Pillow and without native
+# accelerators — prove the export stacks work that way.
+r = client.get('/export/excel')
+check('xlsx export works (openpyxl)',
+      r.status_code == 200 and r.data[:2] == b'PK')
+
+from reportlab.lib.pagesizes import A4              # noqa: E402
+from reportlab.lib.styles import getSampleStyleSheet  # noqa: E402
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table  # noqa: E402
+import io                                            # noqa: E402
+_buf = io.BytesIO()
+SimpleDocTemplate(_buf, pagesize=A4).build(
+    [Paragraph('smoke', getSampleStyleSheet()['Normal']), Table([['a', 'b']])])
+check('pdf build works (reportlab, no Pillow needed)',
+      _buf.getvalue()[:5] == b'%PDF-')
+
 if failures:
     print(f'\n{len(failures)} FAILURES: {failures}')
     sys.exit(1)

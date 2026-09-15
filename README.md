@@ -13,10 +13,23 @@ to verify a download.
 
 1. Download the latest `Club_Training_vX.Y.Z.zip` from the
    [Releases page](https://github.com/markosharknz1/Club_Training/releases).
-2. Unzip it anywhere (e.g. `C:\Club Training`). No Python, no installer, no
-   internet needed.
-3. Double-click `Club_Training.exe`. A fresh database is created on first run.
-4. Set your club's name, icon and options under **Setup → Club Settings**.
+2. Right-click the downloaded zip → **Properties** → tick **Unblock** → OK.
+   (This clears Windows' "downloaded from the internet" mark so nothing is
+   blocked; entirely safe to skip if you don't see the tickbox.)
+3. Extract the zip anywhere and double-click **`Club Training.cmd`**.
+4. A small setup window asks where to install (default `C:\Apps\Club_Training`)
+   and offers a desktop shortcut — then the app starts. A fresh database is
+   created on first start.
+5. Set your club's name, icon and options under **Setup → Club Settings**.
+
+**Upgrading?** Run the new version's `Club Training.cmd` and point "Install
+to" at your existing Club Training folder — your database and backups are
+kept, only the app files are refreshed.
+
+There is no `.exe` of ours to run: the app is plain Python source, started by
+the official python.org runtime bundled in the zip (signed by the Python
+Software Foundation). That's why there's no SmartScreen warning — and you can
+read every line of what you're running.
 
 **Moving to a new machine?** Copy `badminton.db` (and the `backups` folder)
 from the old app folder into the new one — that file is all your club data.
@@ -40,12 +53,13 @@ from the old app folder into the new one — that file is all your club data.
 ## Running from source
 
 ```
-install.bat    # installs pinned dependencies (offline wheels included)
-run.bat        # launches the app windowless
+pip install -r requirements.txt
+run.bat        # or: python app.py
 ```
 
-Python 3.12 recommended. The standalone exe is built with `build_exe.bat`
-(PyInstaller).
+Python 3.12 recommended. The release zip is assembled by
+`scripts/build_dist.py` (app source + pure-Python dependencies + the official
+python.org embeddable runtime — no PyInstaller, no compiled code of ours).
 
 ## Safety & verification
 
