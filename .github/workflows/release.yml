@@ -65,7 +65,10 @@ jobs:
           Set-Content "dist\Club_Training\.setup-complete" "ci probe"
           $env:CLUB_TRAINING_NO_WINDOW = '1'
           $env:CLUB_TRAINING_PORT = '7433'
-          $p = Start-Process -FilePath "dist\Club_Training\python\pythonw.exe" -ArgumentList '"dist\Club_Training\launch.py"' -WorkingDirectory "dist\Club_Training" -PassThru
+          # absolute paths: pythonw resolves a relative script path against
+          # its OWN working directory, not the runner's
+          $dist = (Resolve-Path "dist\Club_Training").Path
+          $p = Start-Process -FilePath "$dist\python\pythonw.exe" -ArgumentList "`"$dist\launch.py`"" -WorkingDirectory $dist -PassThru
           $ok = $false
           foreach ($i in 1..30) {
             Start-Sleep -Seconds 2
