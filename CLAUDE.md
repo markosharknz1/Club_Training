@@ -708,6 +708,34 @@ own machine and demo to other club members (e.g. "Carol").
     a real Smart-App-Control machine — README says Unblock the zip first (same caveat as
     Game Scheduler).**
 
+42. **v1.10.0 — admin edit of how a player paid + voucher balance in check-in + About page**
+    (user: "change how a player has paid (for instance, cash to sports voucher)", "pop up how
+    many sports vouchers are left before sports voucher is selected... So that less mistakes
+    are made", About page ask). New endpoint `POST /register/<sd>/attendance/<att>/payment`
+    (`register_edit_payment`) — DELIBERATELY works on CLOSED sessions (mistakes surface at
+    reconciliation); voucher accounting follows automatically (attach uses a session, detach
+    gives it back; non-amount types force amount 0). The voucher pick/validate block was
+    extracted from register_checkin into `_resolve_checkin_voucher(player_id, voucher_id,
+    rec)` — rec's own session stays usable on re-save. detail.html gained a per-row ✎ +
+    "Change payment" modal (payEditModal, `AMOUNT_TYPES` now passed to the template);
+    run.html's check-in modal + the new modal both show the balance: the Sports Voucher
+    button becomes "Sports Voucher (N left)" and selecting it shows green "will use
+    <oldest-with-remaining label>" / red "none remaining" / muted "this check-in already
+    uses the last session" (data from existing `/api/player/<id>/vouchers`; client mirrors
+    the server's oldest-first pick). **REAL PRE-EXISTING BUG FOUND AND FIXED: `{{ x|tojson }}`
+    inside a DOUBLE-quoted HTML attribute truncates the attribute** — Flask's tojson is
+    Markup-safe so autoescape leaves its raw `"` alone (`onclick="openModal(1, "`), which had
+    silently broken run.html's Check in/✎ buttons in the shipped app (day-page check-in was
+    the working path). Fix = single-quote such attributes (tojson escapes `'` as \u0027 —
+    verified); grep for `onclick="[^"]*tojson` when touching templates. Also added the
+    missing `.pay-Sports-Voucher`/`.pay-Visitor`/`.pay-Other` selected-state classes in
+    base.html (selected buttons rendered unstyled). Settings→About now shows release date
+    (`APP_RELEASED` constant beside APP_VERSION — **bump both at release time**), project
+    home link, and contact markosharkau@gmail.com. Verified: 23-check functional suite
+    (temp DB) in session scratchpad + full live click-through on a SEEDED preview server
+    (C:\Claude\.claude\launch.json entry `club-training-preview`, scratchpad preview_ct.py,
+    port 7461 — session-level launch.json, NOT the repo's) — never against the real DB.
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

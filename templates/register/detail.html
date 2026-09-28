@@ -154,6 +154,7 @@
           <th>Group</th>
           <th>Payment</th>
           <th class="text-end">Amount</th>
+          <th style="width:60px"></th>
         </tr>
       </thead>
       <tbody>
@@ -171,13 +172,160 @@
           <td class="text-end">
             {% if a.payment_type in ['Cash','Card'] %}{{ a.amount | float | round | int }}{% else %}—{% endif %}
           </td>
+          <td class="text-end">
+            {# single-quoted attribute: |tojson keeps raw double quotes #}
+            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2"
+                    title="Change how this player paid"
+                    onclick='openPayEdit({{ a.id }}, {{ a.player.id }}, {{ a.player.name|tojson }},
+                             {{ a.payment_type|tojson }}, {{ a.amount|float }})'>
+              ✎
+            </button>
+          </td>
         </tr>
         {% else %}
-        <tr><td colspan="4" class="text-center text-muted py-4">No attendance recorded.</td></tr>
+        <tr><td colspan="5" class="text-center text-muted py-4">No attendance recorded.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
 
+{# ══ Edit payment modal (admin fix-up on a closed session) ═══════════ #}
+<div class="modal fade" id="payEditModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Change payment: <span id="pe-name"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Payment type</label>
+          <div class="d-flex flex-wrap gap-2" id="pe-btns">
+            {% for pt in PAYMENT_TYPES %}
+            <button type="button" class="btn btn-outline-secondary pay-btn"
+                    data-type="{{ pt }}" onclick="peSelect('{{ pt }}')">{{ pt }}</button>
+            {% endfor %}
+          </div>
+          <div id="pe-voucher-info" class="small mt-2 d-none"></div>
+        </div>
+        <div class="mb-3" id="pe-amount-row" style="display:none">
+          <label class="form-label fw-semibold" for="pe-amount">Amount</label>
+          <input type="number" id="pe-amount" class="form-control" step="1" min="0" value="0">
+        </div>
+        <div id="pe-error" class="alert alert-danger d-none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="peSave()">Save change</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PE_AMOUNT_TYPES = new Set({{ AMOUNT_TYPES | tojson }});
+const PE_PRICES = { 'Cash': {{ sd.template.price_cash|float }}, 'Card': {{ sd.template.price_card|float }} };
+let peAttId = null, peType = null, peOriginalType = null, peOriginalAmount = 0;
+let peVoucher = { playerId: null, pending: false, loaded: false, totalLeft: 0, pickLabel: '' };
+
+function openPayEdit(attId, playerId, name, currentType, currentAmount) {
+  peAttId = attId; peOriginalType = currentType; peOriginalAmount = currentAmount;
+  document.getElementById('pe-name').textContent = name;
+  document.getElementById('pe-error').classList.add('d-none');
+  loadPeVouchers(playerId);
+  peSelect(currentType, currentAmount);
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('payEditModal')).show();
+}
+
+function peSelect(type, amount) {
+  peType = type;
+  document.querySelectorAll('#pe-btns .pay-btn').forEach(btn => {
+    const t = btn.dataset.type;
+    btn.className = 'btn pay-btn ' + (t === type ? 'pay-' + t.replace(' ', '-') : 'btn-outline-secondary');
+  });
+  const row = document.getElementById('pe-amount-row');
+  const inp = document.getElementById('pe-amount');
+  if (PE_AMOUNT_TYPES.has(type)) {
+    row.style.display = '';
+    // keep the recorded amount when returning to the original type,
+    // otherwise offer the session price for the newly chosen type
+    inp.value = Math.round(amount !== undefined ? amount
+                : (type === peOriginalType ? peOriginalAmount : (PE_PRICES[type] || 0)));
+  } else {
+    row.style.display = 'none';
+    inp.value = '0';
+  }
+  renderPeVoucherInfo();
+}
+
+function loadPeVouchers(playerId) {
+  peVoucher = { playerId, pending: true, loaded: false, totalLeft: 0, pickLabel: '' };
+  const btn = document.querySelector('#pe-btns .pay-btn[data-type="Sports Voucher"]');
+  if (btn) btn.textContent = 'Sports Voucher';
+  renderPeVoucherInfo();
+  fetch('/api/player/' + playerId + '/vouchers')
+    .then(r => r.json())
+    .then(d => {
+      if (peVoucher.playerId !== playerId) return;
+      const vs = d.vouchers || [];
+      let total = 0, pick = null;
+      for (let i = vs.length - 1; i >= 0; i--) {          // oldest first, like the server
+        total += vs[i].sessions_remaining;
+        if (!pick && vs[i].sessions_remaining > 0) pick = vs[i];
+      }
+      peVoucher = { playerId, pending: false, loaded: true,
+                    totalLeft: total, pickLabel: pick ? pick.label : '' };
+      if (btn) btn.textContent = `Sports Voucher (${total} left)`;
+      renderPeVoucherInfo();
+    })
+    .catch(() => { peVoucher.pending = false; renderPeVoucherInfo(); });
+}
+
+function renderPeVoucherInfo() {
+  const div = document.getElementById('pe-voucher-info');
+  if (peType !== 'Sports Voucher') { div.classList.add('d-none'); return; }
+  div.classList.remove('d-none');
+  if (peVoucher.pending) {
+    div.className = 'small mt-2 text-muted';
+    div.textContent = 'Checking voucher balance…';
+  } else if (!peVoucher.loaded) {
+    div.className = 'small mt-2 d-none';
+  } else if (peVoucher.totalLeft > 0) {
+    const s = peVoucher.totalLeft === 1 ? '' : 's';
+    div.className = 'small mt-2 text-success';
+    div.textContent = `✓ ${peVoucher.totalLeft} voucher session${s} left — will use ${peVoucher.pickLabel}`;
+  } else if (peOriginalType === 'Sports Voucher') {
+    div.className = 'small mt-2 text-muted';
+    div.textContent = 'This check-in already uses the last remaining voucher session.';
+  } else {
+    div.className = 'small mt-2 text-danger fw-semibold';
+    div.textContent = 'No voucher sessions remaining for this player — register one on the Vouchers page first.';
+  }
+}
+
+function peSave() {
+  fetch('/register/{{ sd.id }}/attendance/' + peAttId + '/payment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      payment_type: peType,
+      amount: parseFloat(document.getElementById('pe-amount').value) || 0,
+    }),
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (!data.ok) {
+      const err = document.getElementById('pe-error');
+      err.textContent = data.error;
+      err.classList.remove('d-none');
+      return;
+    }
+    location.reload();   // summaries, breakdowns and totals all recompute
+  });
+}
+</script>
 {% endblock %}

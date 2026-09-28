@@ -149,20 +149,21 @@
             </td>
             <td class="text-end">
               {% if a %}
+              {# single-quoted attributes: |tojson keeps raw double quotes #}
               <button type="button" class="btn btn-success btn-sm py-0 px-2"
-                      onclick="openModal({{ p.id }}, {{ p.name|tojson }},
-                               {{ a.group_id or p.default_group_id or 'null' }},
+                      onclick='openModal({{ p.id }}, {{ p.name|tojson }},
+                               {{ a.group_id or p.default_group_id or "null" }},
                                {{ tmpl.price_cash|float }}, {{ tmpl.price_card|float }},
                                {{ a.payment_type|tojson }}, {{ (a.amount|float) }},
-                               {{ 'true' if a.new_member else 'false' }})">
+                               {{ "true" if a.new_member else "false" }})'>
                 ✎
               </button>
               {% else %}
               <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2"
-                      onclick="openModal({{ p.id }}, {{ p.name|tojson }},
-                               {{ p.default_group_id or 'null' }},
+                      onclick='openModal({{ p.id }}, {{ p.name|tojson }},
+                               {{ p.default_group_id or "null" }},
                                {{ tmpl.price_cash|float }}, {{ tmpl.price_card|float }},
-                               null, 0)">
+                               null, 0)'>
                 Check in
               </button>
               {% endif %}
@@ -206,6 +207,7 @@
             </button>
             {% endfor %}
           </div>
+          <div id="voucher-info" class="small mt-2 d-none"></div>
         </div>
 
         <div class="mb-3" id="amount-row" style="display:none">
@@ -332,6 +334,7 @@ const SD_ID      = {{ sd.id }};
 let selectedType = null;
 let currentPlayerId = null;
 let isCheckedIn  = false;
+let isVoucherCheckin = false;   // the record being edited already uses a voucher
 
 const AMOUNT_TYPES = new Set({{ AMOUNT_TYPES | tojson }});
 
@@ -340,6 +343,8 @@ function openModal(playerId, playerName, defaultGroupId, cashPrice, cardPrice,
                    existingType, existingAmount, existingNewMember) {
   currentPlayerId = playerId;
   isCheckedIn     = existingType !== null && existingType !== undefined;
+  isVoucherCheckin = existingType === 'Sports Voucher';
+  loadVoucherInfo(playerId);
   document.getElementById('modal-player-id').value  = playerId;
   document.getElementById('modal-name').textContent  = playerName;
   document.getElementById('modal-cash-price').value  = cashPrice;
@@ -367,6 +372,56 @@ function openModal(playerId, playerName, defaultGroupId, cashPrice, cardPrice,
   bootstrap.Modal.getOrCreateInstance(document.getElementById('checkinModal')).show();
 }
 
+// ── Voucher balance (shown so Sports Voucher mistakes are caught early) ──
+let voucherState = { playerId: null, pending: false, loaded: false, totalLeft: 0, pickLabel: '' };
+
+function loadVoucherInfo(playerId) {
+  voucherState = { playerId, pending: true, loaded: false, totalLeft: 0, pickLabel: '' };
+  const btn = document.querySelector('.pay-btn[data-type="Sports Voucher"]');
+  if (btn) btn.textContent = 'Sports Voucher';
+  renderVoucherInfo();
+  fetch('/api/player/' + playerId + '/vouchers')
+    .then(r => r.json())
+    .then(d => {
+      if (voucherState.playerId !== playerId) return;   // modal moved on to someone else
+      const vs = d.vouchers || [];
+      let total = 0, pick = null;
+      // API lists newest first; the server redeems the OLDEST with sessions left
+      for (let i = vs.length - 1; i >= 0; i--) {
+        total += vs[i].sessions_remaining;
+        if (!pick && vs[i].sessions_remaining > 0) pick = vs[i];
+      }
+      voucherState = { playerId, pending: false, loaded: true,
+                       totalLeft: total, pickLabel: pick ? pick.label : '' };
+      if (btn) btn.textContent = `Sports Voucher (${total} left)`;
+      renderVoucherInfo();
+    })
+    .catch(() => { voucherState.pending = false; renderVoucherInfo(); });
+}
+
+function renderVoucherInfo() {
+  const div = document.getElementById('voucher-info');
+  if (!div) return;
+  if (selectedType !== 'Sports Voucher') { div.classList.add('d-none'); return; }
+  div.classList.remove('d-none');
+  if (voucherState.pending) {
+    div.className = 'small mt-2 text-muted';
+    div.textContent = 'Checking voucher balance…';
+  } else if (!voucherState.loaded) {
+    div.className = 'small mt-2 d-none';
+  } else if (voucherState.totalLeft > 0) {
+    const s = voucherState.totalLeft === 1 ? '' : 's';
+    div.className = 'small mt-2 text-success';
+    div.textContent = `✓ ${voucherState.totalLeft} voucher session${s} left — will use ${voucherState.pickLabel}`;
+  } else if (isVoucherCheckin) {
+    div.className = 'small mt-2 text-muted';
+    div.textContent = 'This check-in already uses the last remaining voucher session.';
+  } else {
+    div.className = 'small mt-2 text-danger fw-semibold';
+    div.textContent = 'No voucher sessions remaining for this player — register one on the Vouchers page first.';
+  }
+}
+
 // ── Select payment type ─────────────────────────────────────────────
 function selectType(type, amount) {
   selectedType = type;
@@ -392,6 +447,7 @@ function selectType(type, amount) {
     amtRow.style.display = 'none';
     amtInp.value = '0';
   }
+  renderVoucherInfo();
 }
 
 // ── Confirm check-in ────────────────────────────────────────────────

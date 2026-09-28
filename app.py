@@ -21,7 +21,8 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
 
-APP_VERSION = '1.9.0'
+APP_VERSION  = '1.10.0'
+APP_RELEASED = '29 September 2026'   # bump alongside APP_VERSION at release time
 
 # ─── Branding ───────────────────────────────────────────────────────
 # Bundled club icons (static/icons/sports/<key>.svg — see LICENSE.md there).
@@ -1254,6 +1255,36 @@ def create_app():
                                AMOUNT_TYPES=list(AMOUNT_TYPES),
                                PAYMENT_COLORS=PAYMENT_COLORS)
 
+    def _resolve_checkin_voucher(player_id, voucher_id, rec):
+        """Pick and validate the voucher a Sports Voucher check-in should use.
+        `rec` is the player's existing Attendance row (or None) — a session it
+        already occupies on a voucher stays usable when re-saving. Returns
+        (voucher_id, None) or (None, error_message)."""
+        already_id = rec.voucher_id if rec else None
+        if voucher_id:
+            voucher = Voucher.query.filter_by(id=voucher_id, player_id=player_id).first()
+            if not voucher:
+                return None, 'Voucher not found for this player.'
+        else:
+            # No specific voucher chosen (e.g. checked in from a page without a
+            # voucher picker) — fall back to the oldest voucher with sessions left.
+            voucher = None
+            for v in (Voucher.query.filter_by(player_id=player_id, hidden=False)
+                      .order_by(Voucher.date_issued).all()):
+                eff_remaining = v.sessions_remaining + (1 if v.id == already_id else 0)
+                if eff_remaining > 0:
+                    voucher = v
+                    break
+            if not voucher:
+                return None, ('No Sports Voucher on file with sessions remaining for this child. '
+                              'Register one on the Vouchers page.')
+
+        already_this_voucher = rec is not None and rec.voucher_id == voucher.id
+        effective_remaining = voucher.sessions_remaining + (1 if already_this_voucher else 0)
+        if effective_remaining <= 0:
+            return None, 'That voucher has no sessions remaining.'
+        return voucher.id, None
+
     @app.route('/register/<int:sd_id>/checkin', methods=['POST'])
     def register_checkin(sd_id):
         sd = SessionDate.query.get_or_404(sd_id)
@@ -1271,31 +1302,9 @@ def create_app():
         rec = Attendance.query.filter_by(session_date_id=sd_id, player_id=player_id).first()
 
         if payment_type == 'Sports Voucher':
-            already_id = rec.voucher_id if rec else None
-            if voucher_id:
-                voucher = Voucher.query.filter_by(id=voucher_id, player_id=player_id).first()
-                if not voucher:
-                    return jsonify({'ok': False, 'error': 'Voucher not found for this player.'})
-            else:
-                # No specific voucher chosen (e.g. checked in from a page without a
-                # voucher picker) — fall back to the oldest voucher with sessions left.
-                voucher = None
-                for v in (Voucher.query.filter_by(player_id=player_id, hidden=False)
-                          .order_by(Voucher.date_issued).all()):
-                    eff_remaining = v.sessions_remaining + (1 if v.id == already_id else 0)
-                    if eff_remaining > 0:
-                        voucher = v
-                        break
-                if not voucher:
-                    return jsonify({'ok': False, 'error':
-                        'No Sports Voucher on file with sessions remaining for this child. '
-                        'Register one on the Vouchers page.'})
-                voucher_id = voucher.id
-
-            already_this_voucher = rec is not None and rec.voucher_id == voucher_id
-            effective_remaining = voucher.sessions_remaining + (1 if already_this_voucher else 0)
-            if effective_remaining <= 0:
-                return jsonify({'ok': False, 'error': 'That voucher has no sessions remaining.'})
+            voucher_id, verr = _resolve_checkin_voucher(player_id, voucher_id, rec)
+            if verr:
+                return jsonify({'ok': False, 'error': verr})
         else:
             voucher_id = None
 
@@ -1323,6 +1332,39 @@ def create_app():
         data = request.get_json()
         Attendance.query.filter_by(session_date_id=sd_id,
                                    player_id=int(data['player_id'])).delete()
+        db.session.commit()
+        db.session.refresh(sd)
+        return jsonify({'ok': True, 'totals': _totals(sd)})
+
+    @app.route('/register/<int:sd_id>/attendance/<int:att_id>/payment', methods=['POST'])
+    def register_edit_payment(sd_id, att_id):
+        """Admin fix-up: change how a player paid for a session they already
+        attended (e.g. Cash recorded, actually a Sports Voucher). Unlike
+        check-in, this deliberately works on CLOSED sessions too — mistakes
+        are usually found at reconciliation, after the night is closed.
+        Voucher accounting follows automatically: attaching a voucher uses a
+        session on it, detaching gives the session back."""
+        sd  = SessionDate.query.get_or_404(sd_id)
+        rec = Attendance.query.filter_by(id=att_id, session_date_id=sd_id).first_or_404()
+        data = request.get_json() or {}
+        payment_type = data.get('payment_type')
+        if payment_type not in PAYMENT_TYPES:
+            return jsonify({'ok': False, 'error': 'Unknown payment type.'})
+        amount = float(data.get('amount') or 0)
+
+        if payment_type == 'Sports Voucher':
+            voucher_id, verr = _resolve_checkin_voucher(
+                rec.player_id, _int(data.get('voucher_id')), rec)
+            if verr:
+                return jsonify({'ok': False, 'error': verr})
+        else:
+            voucher_id = None
+        if payment_type not in AMOUNT_TYPES:
+            amount = 0
+
+        rec.payment_type = payment_type
+        rec.amount       = amount
+        rec.voucher_id   = voucher_id
         db.session.commit()
         db.session.refresh(sd)
         return jsonify({'ok': True, 'totals': _totals(sd)})
@@ -1367,6 +1409,7 @@ def create_app():
         sd = SessionDate.query.get_or_404(sd_id)
         return render_template('register/detail.html', sd=sd,
                                PAYMENT_TYPES=PAYMENT_TYPES,
+                               AMOUNT_TYPES=list(AMOUNT_TYPES),
                                PAYMENT_COLORS=PAYMENT_COLORS)
 
     @app.route('/register/<int:sd_id>/reopen', methods=['POST'])
@@ -2356,7 +2399,7 @@ def create_app():
                        oldest_date=past[0].date if past else None,
                        newest_past_date=past[-1].date if past else None)
         elif section == 'about':
-            ctx.update(app_version=APP_VERSION)
+            ctx.update(app_version=APP_VERSION, app_released=APP_RELEASED)
         return render_template(f'settings/{section}.html', **ctx)
 
     def _settings_save(section):
