@@ -1,6 +1,68 @@
 {% extends 'settings/_layout.html' %}
 {% block section_content %}
 
+<div class="card shadow-sm border-0 mb-3" style="max-width:640px">
+  <div class="card-header fw-semibold">Check-in from other computers</div>
+  <div class="card-body">
+    <p class="small mb-3">
+      Let other PCs on the same network (a second check-in desk) use this club's
+      Club Training. They connect to <em>this</em> computer — there is still only
+      one database, kept right here. Install the
+      <a href="https://github.com/markosharknz1/Club_Training_Companion"
+         target="_blank" rel="noopener noreferrer">companion app</a> on the other PC,
+      or open the address below in Edge.
+    </p>
+    <form method="post">
+      <div class="form-check form-switch mb-2">
+        <input class="form-check-input" type="checkbox" id="network_access"
+               name="network_access" {% if network_access %}checked{% endif %}>
+        <label class="form-check-label" for="network_access">
+          Allow other computers on this network
+        </label>
+      </div>
+      <div class="row g-2 mb-2" style="max-width:420px">
+        <div class="col-7">
+          <label class="form-label small fw-semibold mb-1" for="network_pin">
+            Check-in PIN {% if network_pin_set %}<span class="text-success">(set)</span>{% endif %}
+          </label>
+          <input type="text" id="network_pin" name="network_pin" class="form-control form-control-sm"
+                 inputmode="numeric" pattern="\d{4,8}" autocomplete="off"
+                 placeholder="{% if network_pin_set %}unchanged unless typed{% else %}4–8 digits{% endif %}">
+        </div>
+        <div class="col-5">
+          <label class="form-label small fw-semibold mb-1" for="network_port">Port</label>
+          <input type="text" id="network_port" name="network_port" class="form-control form-control-sm"
+                 value="{{ network_port }}" inputmode="numeric">
+        </div>
+      </div>
+      <p class="form-text mb-3">
+        Other computers must enter the PIN once — the database holds kids' details,
+        so never leave it open to the venue's Wi-Fi without one.
+      </p>
+      {% if network_access %}
+      <div class="alert alert-info py-2 small mb-3">
+        <div class="fw-semibold mb-1">On the other PC, connect to this computer:</div>
+        <code>{{ computer_name }}{% if network_port != '7433' %}:{{ network_port }}{% endif %}</code>
+        {% if lan_ips %}
+          — or if the name doesn't work:
+          {% for ip in lan_ips %}<code>{{ ip }}{% if network_port != '7433' %}:{{ network_port }}{% endif %}</code>{% if not loop.last %} or {% endif %}{% endfor %}
+        {% endif %}
+        {% if running_port != network_port %}
+        <div class="text-danger mt-1">The app is currently running on port {{ running_port }} —
+          restart Club Training so the setting takes effect.</div>
+        {% else %}
+        <div class="text-muted mt-1">Windows will ask once to allow the app through the
+          firewall — choose Allow for private networks.</div>
+        {% endif %}
+      </div>
+      {% else %}
+      <p class="form-text mb-3">After saving, restart Club Training for this to take effect.</p>
+      {% endif %}
+      <button class="btn btn-primary btn-sm">Save</button>
+    </form>
+  </div>
+</div>
+
 <div class="card shadow-sm border-0" style="max-width:640px">
   <div class="card-header fw-semibold">Security &amp; Privacy</div>
   <div class="card-body">

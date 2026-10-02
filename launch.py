@@ -128,13 +128,15 @@ def run_app():
                 os.path.join(BASE_DIR, '.edge-app-profile'))
             return
 
-    from app import create_app, _free_port, _wait_for_server
+    from app import create_app, _network_bind, _wait_for_server
 
     app = create_app()
-    port = (int(os.environ['CLUB_TRAINING_PORT'])
-            if 'CLUB_TRAINING_PORT' in os.environ else _free_port())
+    if 'CLUB_TRAINING_PORT' in os.environ:     # CI probe: local-only, fixed
+        host, port = '127.0.0.1', int(os.environ['CLUB_TRAINING_PORT'])
+    else:
+        host, port = _network_bind(app)
     server_thread = threading.Thread(
-        target=lambda: app.run(host='127.0.0.1', port=port,
+        target=lambda: app.run(host=host, port=port,
                                debug=False, use_reloader=False),
         daemon=True,
     )

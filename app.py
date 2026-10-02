@@ -10,8 +10,8 @@ from email.mime.text import MIMEText
 from collections import defaultdict, OrderedDict
 from datetime import date, datetime, timedelta
 
-from flask import (Flask, jsonify, flash, redirect, render_template,
-                   request, url_for)
+from flask import (Flask, abort, jsonify, flash, redirect, render_template,
+                   request, session, url_for)
 
 import config
 from models import (db, Setting, SessionTemplate, Group, Coach, Player,
@@ -122,21 +122,86 @@ def create_app():
     app = Flask(__name__,
                 template_folder=os.path.join(res, 'templates'),
                 static_folder=os.path.join(res, 'static'))
-    app.secret_key = 'bc-club-local-2025'
+    app.secret_key = 'bc-club-local-2025'   # replaced by a per-install secret below
     app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{config.DB_PATH}'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    # Two desks can save at once when network access is on — let SQLite wait
+    # for the other write instead of failing immediately.
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'connect_args': {'timeout': 15}}
+    app.permanent_session_lifetime = timedelta(days=180)
     db.init_app(app)
 
     @app.route('/__alive')
     def _alive():
         # launch.py's single-instance check — confirms the process on a
-        # remembered port really is this app before reusing it
-        return jsonify(app='club-training', version=APP_VERSION)
+        # remembered port really is this app before reusing it. Also the
+        # companion app's "can I reach the club PC?" probe.
+        return jsonify(app='club-training', version=APP_VERSION,
+                       club=Setting.get('club_name', 'Club Training'))
+
+    # ── Network access (companion PCs) ────────────────────────────────
+    # The app is local-only unless the admin turns on network access AND
+    # sets a PIN. Requests from other machines must then carry a session
+    # that has passed the PIN page — the database holds kids' details, so
+    # nothing is served to the venue's Wi-Fi without it.
+    _pin_fails = {}   # ip -> (fail_count, locked_until_epoch)
+
+    def _is_local_request():
+        return request.remote_addr in (None, '127.0.0.1', '::1')
+
+    @app.before_request
+    def _network_gate():
+        if _is_local_request():
+            return None
+        import hmac
+        if (Setting.get('network_access', '0') != '1'
+                or not Setting.get('network_pin', '')):
+            abort(403)
+        if request.endpoint in ('static', 'network_login', '_alive'):
+            return None
+        if session.get('network_ok'):
+            return None
+        return redirect(url_for('network_login', next=request.path))
+
+    @app.route('/network-login', methods=['GET', 'POST'])
+    def network_login():
+        import hmac
+        if _is_local_request():
+            return redirect('/')
+        error = None
+        if request.method == 'POST':
+            ip = request.remote_addr
+            fails, locked_until = _pin_fails.get(ip, (0, 0))
+            if time.time() < locked_until:
+                error = 'Too many wrong attempts — try again in 15 minutes.'
+            elif hmac.compare_digest(request.form.get('pin', '').strip(),
+                                     Setting.get('network_pin', '')):
+                _pin_fails.pop(ip, None)
+                session.permanent = True
+                session['network_ok'] = True
+                nxt = request.form.get('next', '')
+                if not nxt.startswith('/') or nxt.startswith('//'):
+                    nxt = '/'
+                return redirect(nxt)
+            else:
+                fails += 1
+                _pin_fails[ip] = (fails,
+                                  time.time() + 900 if fails >= 10 else 0)
+                error = 'Wrong PIN — ask the club admin for the check-in PIN.'
+        return render_template('network_login.html', error=error,
+                               next=request.values.get('next', '/'))
 
     with app.app_context():
         db.create_all()
         if not Setting.query.get('club_name'):
             db.session.add(Setting(key='club_name', value='Club Training'))
+        # Per-install session secret (never the same across clubs, so a
+        # signed cookie from one install means nothing to another).
+        if not Setting.query.get('app_secret'):
+            import secrets as _secrets
+            db.session.add(Setting(key='app_secret', value=_secrets.token_hex(32)))
+            db.session.commit()
+        app.secret_key = Setting.query.get('app_secret').value
         # Rename migration: the single email_enabled flag became
         # email_sending_enabled (fields have their own toggle, default on).
         if (not Setting.query.get('email_sending_enabled')
@@ -2392,6 +2457,15 @@ def create_app():
                 gmail_username=Setting.get('gmail_username', ''),
                 gmail_password_set=bool(Setting.get('gmail_app_password', '')),
                 configured_providers=_configured_providers())
+        elif section == 'security':
+            running_port = request.host.rsplit(':', 1)[1] if ':' in request.host else '80'
+            ctx.update(
+                network_access=Setting.get('network_access', '0') == '1',
+                network_pin_set=bool(Setting.get('network_pin', '')),
+                network_port=Setting.get('network_port', '7433'),
+                running_port=running_port,
+                computer_name=socket.gethostname(),
+                lan_ips=_lan_addresses())
         elif section == 'data':
             past = (SessionDate.query.filter(SessionDate.date < date.today())
                     .order_by(SessionDate.date).all())
@@ -2496,6 +2570,20 @@ def create_app():
             new_gpwd = request.form.get('gmail_app_password', '').strip()
             if new_gpwd:
                 Setting.set('gmail_app_password', new_gpwd)
+        elif section == 'security':
+            enable = bool(request.form.get('network_access'))
+            new_pin = request.form.get('network_pin', '').strip()
+            if new_pin and not re.fullmatch(r'\d{4,8}', new_pin):
+                return 'The PIN must be 4 to 8 digits.'
+            if new_pin:
+                Setting.set('network_pin', new_pin)
+            if enable and not Setting.get('network_pin', ''):
+                return 'Set a PIN before allowing other computers — the database holds kids\' details.'
+            port = request.form.get('network_port', '7433').strip() or '7433'
+            if not port.isdigit() or not (1024 <= int(port) <= 65535):
+                return 'The port must be a number between 1024 and 65535.'
+            Setting.set('network_port', port)
+            Setting.set('network_access', '1' if enable else '0')
         elif section == 'data':
             Setting.set('testing_mode', '1' if request.form.get('testing_mode') else '0')
         return None
@@ -3512,6 +3600,37 @@ def _totals(sd):
 
 # ─── Entry point ────────────────────────────────────────────────────
 
+def _lan_addresses():
+    """This machine's LAN IPv4 addresses — what a companion PC types in."""
+    ips = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith('127.'):
+                ips.add(ip)
+    except OSError:
+        pass
+    return sorted(ips)
+
+
+def _network_bind(app):
+    """(host, port) the server should bind: LAN on the configured fixed
+    port when network access is enabled with a PIN, else local-only on the
+    first free port. Falls back to local-only if the fixed port is taken."""
+    with app.app_context():
+        enabled = (Setting.get('network_access', '0') == '1'
+                   and bool(Setting.get('network_pin', '')))
+        port = int(Setting.get('network_port', '7433') or 7433)
+    if enabled:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('0.0.0.0', port))
+            return '0.0.0.0', port
+        except OSError:
+            print(f'  Network port {port} is in use — starting local-only instead.')
+    return '127.0.0.1', _free_port()
+
+
 def _free_port(start=7433):
     for p in range(start, start + 20):
         with socket.socket() as s:
@@ -3545,10 +3664,10 @@ if __name__ == '__main__':
               'Python 3.12 is the known-good fix.\n')
 
     app  = create_app()
-    port = _free_port()
+    host, port = _network_bind(app)
 
     server_thread = threading.Thread(
-        target=lambda: app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False),
+        target=lambda: app.run(host=host, port=port, debug=False, use_reloader=False),
         daemon=True,
     )
     server_thread.start()
