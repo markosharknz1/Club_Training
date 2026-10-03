@@ -334,6 +334,7 @@ class Attendance(db.Model):
     amount          = db.Column(db.Numeric(8, 2), default=0)
     voucher_id      = db.Column(db.Integer, db.ForeignKey('vouchers.id'))
     new_member      = db.Column(db.Boolean, nullable=False, default=False)  # ticked at check-in for first-timers
+    left_injured    = db.Column(db.Boolean, nullable=False, default=False)  # left the session because of an injury
     notes           = db.Column(db.Text)
     marked_at       = db.Column(db.DateTime, default=datetime.utcnow)
 

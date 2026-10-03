@@ -21,8 +21,8 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
 
-APP_VERSION = '1.10.0'
-APP_RELEASED = '29 September 2026'   # bump alongside APP_VERSION at release time
+APP_VERSION = '1.11.0'
+APP_RELEASED = '3 October 2026'   # bump alongside APP_VERSION at release time
 
 # ─── Branding ───────────────────────────────────────────────────────
 # Bundled club icons (static/icons/sports/<key>.svg — see LICENSE.md there).
@@ -216,6 +216,9 @@ def create_app():
             db.session.commit()
         if 'new_member' not in cols:
             db.session.execute(db.text("ALTER TABLE attendance ADD COLUMN new_member BOOLEAN NOT NULL DEFAULT 0"))
+            db.session.commit()
+        if 'left_injured' not in cols:
+            db.session.execute(db.text("ALTER TABLE attendance ADD COLUMN left_injured BOOLEAN NOT NULL DEFAULT 0"))
             db.session.commit()
         player_cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(players)")).fetchall()]
         if 'medicare_number' not in player_cols:
@@ -1172,6 +1175,7 @@ def create_app():
                     'amount':       float(a.amount or 0),
                     'voucher_id':   a.voucher_id,
                     'new_member':   bool(a.new_member),
+                    'left_injured': bool(a.left_injured),
                 }
 
         # Players who attended within the last 3 months → prioritised in the waiting list
@@ -1363,6 +1367,7 @@ def create_app():
         group_id     = _int(data.get('group_id'))
         voucher_id   = _int(data.get('voucher_id'))
         new_member   = bool(data.get('new_member'))
+        left_injured = bool(data.get('left_injured'))
 
         rec = Attendance.query.filter_by(session_date_id=sd_id, player_id=player_id).first()
 
@@ -1379,11 +1384,13 @@ def create_app():
             rec.group_id     = group_id
             rec.voucher_id   = voucher_id
             rec.new_member   = new_member
+            rec.left_injured = left_injured
         else:
             db.session.add(Attendance(
                 session_date_id=sd_id, player_id=player_id,
                 group_id=group_id, payment_type=payment_type, amount=amount,
                 voucher_id=voucher_id, new_member=new_member,
+                left_injured=left_injured,
             ))
         db.session.commit()
         db.session.refresh(sd)
@@ -1430,6 +1437,21 @@ def create_app():
         rec.payment_type = payment_type
         rec.amount       = amount
         rec.voucher_id   = voucher_id
+        if 'left_injured' in data:
+            rec.left_injured = bool(data['left_injured'])
+        db.session.commit()
+        db.session.refresh(sd)
+        return jsonify({'ok': True, 'totals': _totals(sd)})
+
+    @app.route('/register/<int:sd_id>/attendance/<int:att_id>/remove', methods=['POST'])
+    def register_remove_attendance(sd_id, att_id):
+        """Admin fix-up: the wrong child was checked in. Removes the whole
+        attendance row — payment details go with it, and a voucher session
+        is given back automatically. Unlike undo at the desk, this works on
+        CLOSED sessions too (that's when the mistake is usually found)."""
+        sd  = SessionDate.query.get_or_404(sd_id)
+        rec = Attendance.query.filter_by(id=att_id, session_date_id=sd_id).first_or_404()
+        db.session.delete(rec)
         db.session.commit()
         db.session.refresh(sd)
         return jsonify({'ok': True, 'totals': _totals(sd)})
@@ -1511,7 +1533,62 @@ def create_app():
         return render_template('history.html',
                                dates=dates, sessions=sessions,
                                session_filter=session_filter, months=months,
+                               email_ready=_email_configured(),
+                               report_recipients=Setting.get('report_recipients', ''),
+                               report_providers=_configured_providers(),
+                               report_default_provider=_default_provider(),
                                PAYMENT_COLORS=PAYMENT_COLORS)
+
+    @app.route('/history/email-report', methods=['POST'])
+    def history_email_report():
+        """Email a day or month summary report — payments, coaches, new
+        players, injuries — to the addresses given (e.g. the committee)."""
+        if not _email_configured():
+            flash('Set up an email provider first (Setup → Club Settings → Email).', 'warning')
+            return redirect(url_for('history'))
+
+        recipients = [a for a in re.split(r'[,;\s]+', request.form.get('recipients', ''))
+                      if a]
+        bad = [a for a in recipients if '@' not in a or '.' not in a.rsplit('@', 1)[-1]]
+        if not recipients or bad:
+            flash(('These don\'t look like email addresses: ' + ', '.join(bad))
+                  if bad else 'Enter at least one email address.', 'danger')
+            return redirect(url_for('history'))
+
+        club = Setting.get('club_name', 'Club Training')
+        try:
+            if request.form.get('scope') == 'month':
+                year, month = map(int, request.form.get('report_month', '').split('-'))
+                data = _report_month_data(year, month)
+            else:
+                data = _report_day_data(date.fromisoformat(request.form.get('report_date', '')))
+        except (ValueError, TypeError):
+            flash('Pick a valid date or month for the report.', 'danger')
+            return redirect(url_for('history'))
+        if not data:
+            flash('No sessions found for that period — nothing to report.', 'warning')
+            return redirect(url_for('history'))
+
+        provider = request.form.get('provider', '')
+        if provider not in {k for k, _ in _configured_providers()}:
+            provider = _default_provider()
+        Setting.set('report_recipients', ', '.join(recipients))
+
+        subject = f'{club} — {"Day" if data["scope"] == "day" else "Month"} report, {data["title"]}'
+        html = render_template('report_email.html', club=club, **data)
+        text = _report_text(data, club)
+        try:
+            sent, failures = _send_bulk_email(subject, text, recipients,
+                                              html=html, provider=provider)
+        except (smtplib.SMTPException, OSError) as e:
+            flash(f'Report could not be sent: {e}', 'danger')
+            return redirect(url_for('history'))
+        if failures:
+            flash(f'Sent {sent} of {len(recipients)} — failed: {failures[0]}', 'warning')
+        else:
+            flash(f'Report for {data["title"]} sent to {len(recipients)} '
+                  f'address{"es" if len(recipients) != 1 else ""} via {provider}.', 'success')
+        return redirect(url_for('history'))
 
     # ── Sports Vouchers ──────────────────────────────────────────────
 
@@ -3535,6 +3612,139 @@ def _add_voucher_uses(voucher, count, dates, note='Imported balance'):
     for _ in range(count - len(dates)):
         db.session.add(VoucherUse(voucher=voucher, used_date=None,
                                   note=f'{note} (date unknown)'))
+
+
+# ─── Emailed day / month reports ────────────────────────────────────
+
+def _report_session_data(sd):
+    """Everything the report shows about one session occurrence."""
+    counts, cash, card = OrderedDict(), 0.0, 0.0
+    new_players, injured = [], []
+    for a in sorted(sd.attendance, key=lambda a: a.player.name.lower()):
+        counts[a.payment_type] = counts.get(a.payment_type, 0) + 1
+        if a.payment_type == 'Cash':
+            cash += float(a.amount or 0)
+        elif a.payment_type == 'Card':
+            card += float(a.amount or 0)
+        if a.new_member:
+            new_players.append(a.player.name)
+        if a.left_injured:
+            injured.append(a.player.name)
+    breakdown = [(pt, counts[pt]) for pt in PAYMENT_TYPES if pt in counts]
+    return {
+        'name': sd.template.name,
+        'time': f'{sd.template.start_time}–{sd.template.end_time}',
+        'status': sd.status,
+        'players': len(sd.attendance),
+        'breakdown': breakdown,
+        'cash': cash, 'card': card,
+        'new_players': new_players,
+        'injured': injured,
+        # CoachAttendance is how coaches are marked present (the register's
+        # tickboxes) — sd.coaches is a separate legacy relation.
+        'coaches': sorted(ca.coach.name for ca in sd.coach_attendance),
+        'notes': (sd.notes or '').strip(),
+    }
+
+
+def _report_day_data(d):
+    """Report data for one calendar day, or None if nothing ran."""
+    sds = (SessionDate.query.filter_by(date=d)
+           .order_by(SessionDate.session_id).all())
+    if not sds:
+        return None
+    sessions = [_report_session_data(sd) for sd in sds]
+    return {
+        'scope': 'day',
+        'title': d.strftime('%A %d %B %Y'),
+        'sessions': sessions,
+        'total_players': sum(s['players'] for s in sessions),
+        'total_cash': sum(s['cash'] for s in sessions),
+        'total_card': sum(s['card'] for s in sessions),
+    }
+
+
+def _report_month_data(year, month):
+    """Report data for one calendar month, or None if nothing ran."""
+    first = date(year, month, 1)
+    last = (date(year + 1, 1, 1) if month == 12
+            else date(year, month + 1, 1)) - timedelta(days=1)
+    sds = (SessionDate.query
+           .filter(SessionDate.date >= first, SessionDate.date <= last)
+           .order_by(SessionDate.date, SessionDate.session_id).all())
+    if not sds:
+        return None
+    rows, type_counts, players_seen = [], OrderedDict(), set()
+    cash = card = 0.0
+    new_count, injured = 0, []
+    for sd in sds:
+        s = _report_session_data(sd)
+        rows.append({'date': sd.date, 'name': s['name'], 'players': s['players'],
+                     'cash': s['cash'], 'card': s['card']})
+        cash += s['cash']
+        card += s['card']
+        new_count += len(s['new_players'])
+        injured += [(sd.date, n) for n in s['injured']]
+        for a in sd.attendance:
+            players_seen.add(a.player_id)
+            type_counts[a.payment_type] = type_counts.get(a.payment_type, 0) + 1
+    coach_counts = OrderedDict()
+    for ca in (CoachAttendance.query
+               .join(SessionDate, CoachAttendance.session_date_id == SessionDate.id)
+               .filter(SessionDate.date >= first, SessionDate.date <= last)
+               .join(Coach, CoachAttendance.coach_id == Coach.id)
+               .order_by(Coach.name).all()):
+        coach_counts[ca.coach.name] = coach_counts.get(ca.coach.name, 0) + 1
+    return {
+        'scope': 'month',
+        'title': f'{_cal_mod.month_name[month]} {year}',
+        'rows': rows,
+        'sessions_run': len(sds),
+        'total_checkins': sum(r['players'] for r in rows),
+        'unique_players': len(players_seen),
+        'total_cash': cash, 'total_card': card,
+        'type_counts': [(pt, type_counts[pt]) for pt in PAYMENT_TYPES if pt in type_counts],
+        'coach_counts': list(coach_counts.items()),
+        'new_count': new_count,
+        'injured': injured,
+    }
+
+
+def _report_text(data, club):
+    """Plain-text version of the report (the HTML is the readable one)."""
+    lines = [f'{club} — {data["title"]}', '']
+    if data['scope'] == 'day':
+        for s in data['sessions']:
+            lines.append(f'{s["name"]} ({s["time"]}) — {s["players"]} player(s), '
+                         f'{"closed" if s["status"] == "closed" else "still open"}')
+            for pt, cnt in s['breakdown']:
+                lines.append(f'  {pt}: {cnt}')
+            lines.append(f'  Cash ${s["cash"]:.0f} · Card ${s["card"]:.0f}')
+            if s['coaches']:
+                lines.append('  Coaches: ' + ', '.join(s['coaches']))
+            if s['new_players']:
+                lines.append('  New players: ' + ', '.join(s['new_players']))
+            if s['injured']:
+                lines.append('  Left injured: ' + ', '.join(s['injured']))
+            if s['notes']:
+                lines.append('  Notes: ' + s['notes'])
+            lines.append('')
+        lines.append(f'Day total: {data["total_players"]} check-in(s), '
+                     f'Cash ${data["total_cash"]:.0f}, Card ${data["total_card"]:.0f}')
+    else:
+        lines.append(f'{data["sessions_run"]} session(s), {data["total_checkins"]} check-in(s), '
+                     f'{data["unique_players"]} different player(s)')
+        lines.append(f'Cash ${data["total_cash"]:.0f} · Card ${data["total_card"]:.0f}')
+        for pt, cnt in data['type_counts']:
+            lines.append(f'  {pt}: {cnt}')
+        if data['coach_counts']:
+            lines.append('Coaches: ' + ', '.join(f'{n} ({c})' for n, c in data['coach_counts']))
+        if data['new_count']:
+            lines.append(f'New players: {data["new_count"]}')
+        if data['injured']:
+            lines.append('Left injured: ' + ', '.join(
+                f'{n} ({d.strftime("%d %b")})' for d, n in data['injured']))
+    return '\n'.join(lines)
 
 
 def _voucher_defaults():

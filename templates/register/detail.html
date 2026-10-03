@@ -116,10 +116,10 @@
     <div class="card shadow-sm border-0 h-100">
       <div class="card-header fw-semibold">Coaches</div>
       <div class="card-body">
-        {% if sd.coaches %}
+        {% if sd.coach_attendance %}
         <ul class="list-unstyled mb-0 small">
-          {% for c in sd.coaches %}
-          <li>{{ c.name }}</li>
+          {% for ca in sd.coach_attendance %}
+          <li>{{ ca.coach.name }}</li>
           {% endfor %}
         </ul>
         {% else %}
@@ -168,6 +168,8 @@
             <span class="badge bg-{{ PAYMENT_COLORS.get(a.payment_type,'secondary') }}">
               {{ a.payment_type }}
             </span>
+            {% if a.new_member %}<span class="badge bg-warning text-dark" style="font-size:.65rem">NEW</span>{% endif %}
+            {% if a.left_injured %}<span class="badge bg-danger" style="font-size:.65rem">left injured</span>{% endif %}
           </td>
           <td class="text-end">
             {% if a.payment_type in ['Cash','Card'] %}{{ a.amount | float | round | int }}{% else %}—{% endif %}
@@ -175,9 +177,10 @@
           <td class="text-end">
             {# single-quoted attribute: |tojson keeps raw double quotes #}
             <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2"
-                    title="Change how this player paid"
+                    title="Change this player's record"
                     onclick='openPayEdit({{ a.id }}, {{ a.player.id }}, {{ a.player.name|tojson }},
-                             {{ a.payment_type|tojson }}, {{ a.amount|float }})'>
+                             {{ a.payment_type|tojson }}, {{ a.amount|float }},
+                             {{ "true" if a.left_injured else "false" }})'>
               ✎
             </button>
           </td>
@@ -213,11 +216,23 @@
           <label class="form-label fw-semibold" for="pe-amount">Amount</label>
           <input type="number" id="pe-amount" class="form-control" step="1" min="0" value="0">
         </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="pe-left-injured">
+          <label class="form-check-label" for="pe-left-injured">
+            Left injured <span class="text-muted small">(had to leave because of an injury)</span>
+          </label>
+        </div>
         <div id="pe-error" class="alert alert-danger d-none"></div>
       </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary" onclick="peSave()">Save change</button>
+      <div class="modal-footer d-flex justify-content-between">
+        <button type="button" class="btn btn-outline-danger" onclick="peRemove()"
+                title="Wrong child checked in — removes the whole record, payment included">
+          Remove from this session
+        </button>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="peSave()">Save change</button>
+        </div>
       </div>
     </div>
   </div>
@@ -232,13 +247,30 @@ const PE_PRICES = { 'Cash': {{ sd.template.price_cash|float }}, 'Card': {{ sd.te
 let peAttId = null, peType = null, peOriginalType = null, peOriginalAmount = 0;
 let peVoucher = { playerId: null, pending: false, loaded: false, totalLeft: 0, pickLabel: '' };
 
-function openPayEdit(attId, playerId, name, currentType, currentAmount) {
+function openPayEdit(attId, playerId, name, currentType, currentAmount, leftInjured) {
   peAttId = attId; peOriginalType = currentType; peOriginalAmount = currentAmount;
   document.getElementById('pe-name').textContent = name;
   document.getElementById('pe-error').classList.add('d-none');
+  document.getElementById('pe-left-injured').checked = !!leftInjured;
   loadPeVouchers(playerId);
   peSelect(currentType, currentAmount);
   bootstrap.Modal.getOrCreateInstance(document.getElementById('payEditModal')).show();
+}
+
+function peRemove() {
+  const name = document.getElementById('pe-name').textContent;
+  if (!confirm(`Remove ${name} from this session? Their payment record goes too, and a voucher session is given back.`)) return;
+  fetch('/register/{{ sd.id }}/attendance/' + peAttId + '/remove', { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok) {
+        const err = document.getElementById('pe-error');
+        err.textContent = data.error || 'Could not remove.';
+        err.classList.remove('d-none');
+        return;
+      }
+      location.reload();
+    });
 }
 
 function peSelect(type, amount) {
@@ -314,6 +346,7 @@ function peSave() {
     body: JSON.stringify({
       payment_type: peType,
       amount: parseFloat(document.getElementById('pe-amount').value) || 0,
+      left_injured: document.getElementById('pe-left-injured').checked,
     }),
   })
   .then(r => r.json())

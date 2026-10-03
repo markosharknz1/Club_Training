@@ -27,16 +27,17 @@
       <div id="smtpFields" {% if not email_sending_enabled %}class="d-none"{% endif %}>
         <hr>
         <div class="mb-3">
-          <label class="form-label fw-semibold">Preferred provider</label>
+          <label class="form-label fw-semibold">Default provider</label>
           <select name="email_provider" class="form-select" style="max-width:280px">
             <option value="smtp2go" {% if email_provider == 'smtp2go' %}selected{% endif %}>SMTP2GO</option>
             <option value="mailgun" {% if email_provider == 'mailgun' %}selected{% endif %}>Mailgun</option>
             <option value="gmail"   {% if email_provider == 'gmail'   %}selected{% endif %}>Gmail</option>
           </select>
-          <div class="form-text">Used by default; you can switch per send on the Email page.
-            Rough guide by volume: <strong>Gmail</strong> for occasional notes (~500/day cap),
-            <strong>SMTP2GO</strong> for regular club emails (generous free tier),
-            <strong>Mailgun</strong> for larger volumes.</div>
+          <div class="form-text">Every email goes through this provider unless you switch
+            per send on the Email page. Rough guide by volume:
+            <strong>Gmail</strong> for occasional notes (~500 recipients/day cap),
+            <strong>SMTP2GO</strong> for regular club emails (free tier),
+            <strong>Mailgun</strong> for larger volumes (paid, own domain).</div>
         </div>
 
         <div class="row g-2 mb-3">
@@ -57,16 +58,32 @@
         {# ── SMTP2GO ── #}
         <div class="card mb-3">
           <div class="card-header py-2 fw-semibold d-flex justify-content-between">
-            <span>SMTP2GO</span>
+            <span>SMTP2GO
+              {% if email_provider == 'smtp2go' %}<span class="badge bg-primary ms-1">default</span>{% endif %}
+            </span>
             {% if smtp_password_set and smtp_username %}<span class="badge bg-success">configured</span>{% endif %}
           </div>
           <div class="card-body py-3">
-            <p class="text-muted small mb-2">
-              Works with SMTP2GO or any standard SMTP provider. Sending limits vary by plan —
-              see <a href="https://www.smtp2go.com/blog/know-your-sending-limits/"
-                 target="_blank" rel="noopener noreferrer">SMTP2GO Sending Limits: Every Cap,
-              Why It Exists, and How to Lift It</a>. Leave the password blank to keep the stored one.
+            <p class="text-muted small mb-1">
+              The easy middle ground — a free account covers a typical club's announcements
+              (currently 200 emails/day, 1,000/month free; see
+              <a href="https://www.smtp2go.com/pricing/" target="_blank"
+                 rel="noopener noreferrer">smtp2go.com/pricing</a>).
+              Works with any standard SMTP provider, not just SMTP2GO.
             </p>
+            <div class="text-muted small mb-2">
+              What you need:
+              <ol class="mb-1 ps-3">
+                <li>A free account at <a href="https://www.smtp2go.com" target="_blank"
+                    rel="noopener noreferrer">smtp2go.com</a>.</li>
+                <li>A verified sender: add the club's email address (or a domain you own)
+                    under <em>Sending → Verified Senders</em> and click the confirmation
+                    email — put that address in <em>From address</em> above.</li>
+                <li>An SMTP user: <em>Sending → SMTP Users → Add SMTP User</em> — copy its
+                    username and password into the fields below.</li>
+              </ol>
+              Leave the password blank to keep the stored one.
+            </div>
             <div class="row g-2 mb-2">
               <div class="col-8">
                 <label class="form-label small fw-semibold mb-1">SMTP server</label>
@@ -93,14 +110,33 @@
         {# ── Mailgun ── #}
         <div class="card mb-3">
           <div class="card-header py-2 fw-semibold d-flex justify-content-between">
-            <span>Mailgun</span>
+            <span>Mailgun
+              {% if email_provider == 'mailgun' %}<span class="badge bg-primary ms-1">default</span>{% endif %}
+            </span>
             {% if mailgun_key_set and mailgun_domain %}<span class="badge bg-success">configured</span>{% endif %}
           </div>
           <div class="card-body py-3">
-            <p class="text-muted small mb-2">
-              Sends through Mailgun's API — suited to larger volumes. You need a Mailgun account
-              with a verified sending domain. Leave the API key blank to keep the stored one.
+            <p class="text-muted small mb-1">
+              For larger volumes — paid after the trial (see
+              <a href="https://www.mailgun.com/pricing/" target="_blank"
+                 rel="noopener noreferrer">mailgun.com/pricing</a>). The most setup of the
+              three: it sends from a <strong>domain the club owns</strong>, not a plain
+              email address.
             </p>
+            <div class="text-muted small mb-2">
+              What you need:
+              <ol class="mb-1 ps-3">
+                <li>An account at <a href="https://www.mailgun.com" target="_blank"
+                    rel="noopener noreferrer">mailgun.com</a>.</li>
+                <li>A sending domain the club owns (e.g. <code>mg.yourclub.org</code>):
+                    add it under <em>Send → Domains</em> and create the DNS records Mailgun
+                    lists at your domain host — it shows "verified" when they're right.</li>
+                <li>Your <em>private API key</em> from the Mailgun dashboard
+                    (<em>API Security → API keys</em>), and the region (US or EU) you chose
+                    when creating the domain.</li>
+              </ol>
+              Leave the API key blank to keep the stored one.
+            </div>
             <div class="row g-2 mb-2">
               <div class="col-7">
                 <label class="form-label small fw-semibold mb-1">Sending domain</label>
@@ -126,18 +162,32 @@
         {# ── Gmail ── #}
         <div class="card mb-3">
           <div class="card-header py-2 fw-semibold d-flex justify-content-between">
-            <span>Gmail</span>
+            <span>Gmail
+              {% if email_provider == 'gmail' %}<span class="badge bg-primary ms-1">default</span>{% endif %}
+            </span>
             {% if gmail_password_set and gmail_username %}<span class="badge bg-success">configured</span>{% endif %}
           </div>
           <div class="card-body py-3">
-            <p class="text-muted small mb-2">
-              Sends from a Gmail account (limit ≈500 recipients/day). Needs an
-              <strong>App Password</strong>, not your normal password: turn on 2-Step
-              Verification in your Google Account, then create one at
-              <a href="https://myaccount.google.com/apppasswords" target="_blank"
-                 rel="noopener noreferrer">myaccount.google.com/apppasswords</a>.
-              Leave it blank to keep the stored one.
+            <p class="text-muted small mb-1">
+              The simplest start if the club already has a Gmail address — no domain needed,
+              but capped at roughly 500 recipients/day and emails always come <em>from</em>
+              that Gmail address.
             </p>
+            <div class="text-muted small mb-2">
+              What you need:
+              <ol class="mb-1 ps-3">
+                <li>A Google account for the club (<a href="https://mail.google.com"
+                    target="_blank" rel="noopener noreferrer">mail.google.com</a>).</li>
+                <li><strong>2-Step Verification</strong> turned on for it
+                    (<a href="https://myaccount.google.com/security" target="_blank"
+                    rel="noopener noreferrer">myaccount.google.com/security</a>).</li>
+                <li>An <strong>App Password</strong> — not the normal password — created at
+                    <a href="https://myaccount.google.com/apppasswords" target="_blank"
+                    rel="noopener noreferrer">myaccount.google.com/apppasswords</a>
+                    (16 characters, shown once).</li>
+              </ol>
+              Leave it blank to keep the stored one.
+            </div>
             <div class="row g-2 mb-2">
               <div class="col-6">
                 <label class="form-label small fw-semibold mb-1">Gmail address</label>

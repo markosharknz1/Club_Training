@@ -106,12 +106,14 @@
             data-age="{{ p.age if p.age is not none else '' }}"
             data-guardian="{{ p.guardian_name or '' }}"
             data-phone="{{ p.guardian_phone or '' }}"
-            data-checkin="{{ {'sd_id': info.sd_id, 'group_id': info.group_id, 'payment_type': info.payment_type, 'amount': info.amount | int, 'voucher_id': info.voucher_id, 'new_member': info.new_member} | tojson }}"
+            {# single-quoted attribute: |tojson keeps raw double quotes #}
+            data-checkin='{{ {'sd_id': info.sd_id, 'group_id': info.group_id, 'payment_type': info.payment_type, 'amount': info.amount | int, 'voucher_id': info.voucher_id, 'new_member': info.new_member, 'left_injured': info.left_injured} | tojson }}'
             style="cursor:pointer;user-select:none">
           <td>
-            <div class="fw-semibold">{{ p.name }}
-              {% if info.new_member %}<span class="badge bg-warning text-dark ms-1" style="font-size:.6rem">NEW</span>{% endif %}
-            </div>
+            {# badges OUTSIDE .fw-semibold — the JS reads the name from it #}
+            <div class="fw-semibold d-inline-block">{{ p.name }}</div>
+            {% if info.new_member %}<span class="badge bg-warning text-dark ms-1" style="font-size:.6rem">NEW</span>{% endif %}
+            {% if info.left_injured %}<span class="badge bg-danger ms-1" style="font-size:.6rem">left injured</span>{% endif %}
             {% if p.siblings %}
             <span class="badge bg-info text-dark" style="font-size:.6rem">siblings</span>
             {% endif %}
@@ -282,6 +284,14 @@
           </button>
         </div>
 
+        {# Only meaningful once checked in — a duty-of-care record #}
+        <div class="form-check mb-3 d-none" id="left-injured-row">
+          <input class="form-check-input" type="checkbox" id="modal-left-injured">
+          <label class="form-check-label" for="modal-left-injured">
+            Left injured <span class="text-muted small">(had to leave because of an injury)</span>
+          </label>
+        </div>
+
         <div id="modal-error" class="alert alert-danger d-none small"></div>
       </div>
       <div class="modal-footer d-flex justify-content-between">
@@ -382,7 +392,7 @@ let squarePollTimer    = null;
 let squareCheckoutId   = null;
 
 // ── Open check-in modal ─────────────────────────────────────────────
-function openCheckin(pid, name, currentSdId, currentGroupId, currentPayType, currentAmount, currentVoucherId, currentNewMember) {
+function openCheckin(pid, name, currentSdId, currentGroupId, currentPayType, currentAmount, currentVoucherId, currentNewMember, currentLeftInjured) {
   currentPlayerId = pid;
   selectedVoucherId = currentVoucherId || null;
   voucherPromptShown = false;
@@ -394,6 +404,9 @@ function openCheckin(pid, name, currentSdId, currentGroupId, currentPayType, cur
   document.getElementById('modal-error').classList.add('d-none');
   // "New player" always starts unticked; keep the saved flag when editing
   document.getElementById('modal-new-member').checked = isCheckedIn ? !!currentNewMember : false;
+  // "Left injured" only applies to someone already checked in
+  document.getElementById('left-injured-row').classList.toggle('d-none', !isCheckedIn);
+  document.getElementById('modal-left-injured').checked = isCheckedIn ? !!currentLeftInjured : false;
 
   // Pre-select session (auto-select if only one)
   selectedSdId = currentSdId;
@@ -677,16 +690,17 @@ function confirmCheckin() {
   const amount    = parseFloat(document.getElementById('modal-amount').value) || 0;
   const voucherId = selectedPayType === 'Sports Voucher' ? selectedVoucherId : null;
   const newMember = document.getElementById('modal-new-member').checked;
+  const leftInjured = isCheckedIn && document.getElementById('modal-left-injured').checked;
   const prevSdId  = parseInt(document.getElementById('modal-current-sd-id').value) || null;
 
   const doCheckin = () => fetch('/register/' + selectedSdId + '/checkin', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({player_id: playerId, payment_type: selectedPayType, amount, group_id: groupId, voucher_id: voucherId, new_member: newMember}),
+    body: JSON.stringify({player_id: playerId, payment_type: selectedPayType, amount, group_id: groupId, voucher_id: voucherId, new_member: newMember, left_injured: leftInjured}),
   }).then(r => r.json()).then(data => {
     if (!data.ok) { showError(data.error); return; }
     bootstrap.Modal.getInstance(document.getElementById('checkinModal')).hide();
-    moveToCheckedIn(playerId, selectedSdId, groupId, selectedPayType, amount, voucherId, newMember);
+    moveToCheckedIn(playerId, selectedSdId, groupId, selectedPayType, amount, voucherId, newMember, leftInjured);
     updateSessionBadges(data.totals, selectedSdId);
   });
 
@@ -788,7 +802,7 @@ function addPlayerRow(player) {
 }
 
 // ── Move players between Waiting / Checked In tables ─────────────────
-function moveToCheckedIn(pid, sdId, groupId, payType, amount, voucherId, newMember) {
+function moveToCheckedIn(pid, sdId, groupId, payType, amount, voucherId, newMember, leftInjured) {
   const row = document.querySelector(`tr[data-player-id="${pid}"]`);
   if (!row) return;
   const name        = row.querySelector('.fw-semibold').textContent.trim();
@@ -813,12 +827,15 @@ function moveToCheckedIn(pid, sdId, groupId, payType, amount, voucherId, newMemb
   tr.dataset.phone       = phone;
   tr.dataset.lastSession = lastSession;
   tr.dataset.lastGroup   = lastGroup;
-  tr.dataset.checkin     = JSON.stringify({sd_id: sdId, group_id: groupId ? parseInt(groupId) : null, payment_type: payType, amount: Math.round(amount), voucher_id: voucherId || null, new_member: !!newMember});
+  tr.dataset.checkin     = JSON.stringify({sd_id: sdId, group_id: groupId ? parseInt(groupId) : null, payment_type: payType, amount: Math.round(amount), voucher_id: voucherId || null, new_member: !!newMember, left_injured: !!leftInjured});
   tr.style.cssText       = 'cursor:pointer;user-select:none';
   const newBadge = newMember ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:.6rem">NEW</span>' : '';
-  tr.innerHTML = `<td><div class="fw-semibold">${name}${newBadge}</div></td>
+  const injuredBadge = leftInjured ? ' <span class="badge bg-danger ms-1" style="font-size:.6rem">left injured</span>' : '';
+  // badges OUTSIDE .fw-semibold — the name is read back from it
+  tr.innerHTML = `<td><div class="fw-semibold d-inline-block"></div>${newBadge}${injuredBadge}</td>
     <td>${sess ? sess.name : ''}</td>`
     + (GROUPS_ENABLED ? `<td class="text-muted">${grp ? grp.name : ''}</td>` : '');
+  tr.querySelector('.fw-semibold').textContent = name;
 
   insertCheckedInRow(tr);
   refreshEmptyStates();
@@ -940,7 +957,8 @@ document.addEventListener('dblclick', function(e) {
     ci ? ci.payment_type: null,
     ci ? ci.amount      : 0,
     ci ? ci.voucher_id  : null,
-    ci ? ci.new_member  : null);
+    ci ? ci.new_member  : null,
+    ci ? ci.left_injured: false);
 });
 
 document.addEventListener('contextmenu', function(e) {

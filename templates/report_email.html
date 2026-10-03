@@ -1,0 +1,123 @@
+{# Emailed day / month report. Inline styles only — email clients ignore
+   stylesheets. Rendered by /history/email-report with the dict from
+   _report_day_data / _report_month_data plus club=. #}
+<div style="font-family:'Segoe UI',system-ui,Arial,sans-serif;max-width:640px;margin:0 auto;color:#1f2937">
+  <div style="background:#1a3a5c;color:#ffffff;padding:14px 20px;border-radius:8px 8px 0 0">
+    <div style="font-size:18px;font-weight:700">{{ club }}</div>
+    <div style="font-size:14px;opacity:.85">{{ 'Day report' if scope == 'day' else 'Month report' }} — {{ title }}</div>
+  </div>
+  <div style="border:1px solid #d9dee5;border-top:0;border-radius:0 0 8px 8px;padding:18px 20px;background:#ffffff">
+
+  {% macro money(v) %}${{ v | round | int }}{% endmacro %}
+
+  {% if scope == 'day' %}
+    {% for s in sessions %}
+    <div style="margin-bottom:18px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:2px">{{ s.name }}
+        <span style="font-weight:400;color:#6b7280;font-size:13px">({{ s.time }}{{ ' — still open' if s.status == 'open' else '' }})</span>
+      </div>
+      <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin:6px 0;width:100%">
+        <tr style="background:#eef2f6">
+          <td style="padding:5px 10px;border:1px solid #d9dee5;font-weight:600">Players checked in</td>
+          <td style="padding:5px 10px;border:1px solid #d9dee5;text-align:right">{{ s.players }}</td>
+        </tr>
+        {% for pt, cnt in s.breakdown %}
+        <tr>
+          <td style="padding:5px 10px;border:1px solid #d9dee5">{{ pt }}</td>
+          <td style="padding:5px 10px;border:1px solid #d9dee5;text-align:right">{{ cnt }}</td>
+        </tr>
+        {% endfor %}
+        <tr style="background:#eef2f6;font-weight:600">
+          <td style="padding:5px 10px;border:1px solid #d9dee5">Cash {{ money(s.cash) }} &nbsp;·&nbsp; Card {{ money(s.card) }}</td>
+          <td style="padding:5px 10px;border:1px solid #d9dee5;text-align:right">{{ money(s.cash + s.card) }}</td>
+        </tr>
+      </table>
+      <div style="font-size:13px;color:#374151;line-height:1.7">
+        <b>Coaches:</b> {{ s.coaches | join(', ') if s.coaches else '—' }}<br>
+        {% if s.new_players %}<b>New players:</b> {{ s.new_players | join(', ') }}<br>{% endif %}
+        {% if s.injured %}<b style="color:#b91c1c">Left injured:</b> {{ s.injured | join(', ') }}<br>{% endif %}
+        {% if s.notes %}<b>Notes:</b> {{ s.notes }}<br>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+    {% if sessions | length > 1 %}
+    <div style="border-top:2px solid #1a3a5c;padding-top:10px;font-size:14px;font-weight:700">
+      Day total: {{ total_players }} check-ins · Cash {{ money(total_cash) }} · Card {{ money(total_card) }}
+    </div>
+    {% endif %}
+
+  {% else %}
+    <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin-bottom:16px;width:100%">
+      <tr style="background:#eef2f6">
+        <td style="padding:5px 10px;border:1px solid #d9dee5;font-weight:600">Sessions run</td>
+        <td style="padding:5px 10px;border:1px solid #d9dee5;text-align:right">{{ sessions_run }}</td>
+      </tr>
+      <tr>
+        <td style="padding:5px 10px;border:1px solid #d9dee5">Check-ins</td>
+        <td style="padding:5px 10px;border:1px solid #d9dee5;text-align:right">{{ total_checkins }}</td>
+      </tr>
+      <tr>
+        <td style="padding:5px 10px;border:1px solid #d9dee5">Different players</td>
+        <td style="padding:5px 10px;border:1px solid #d9dee5;text-align:right">{{ unique_players }}</td>
+      </tr>
+      {% for pt, cnt in type_counts %}
+      <tr>
+        <td style="padding:5px 10px;border:1px solid #d9dee5">Paid by {{ pt }}</td>
+        <td style="padding:5px 10px;border:1px solid #d9dee5;text-align:right">{{ cnt }}</td>
+      </tr>
+      {% endfor %}
+      {% if new_count %}
+      <tr>
+        <td style="padding:5px 10px;border:1px solid #d9dee5">New players</td>
+        <td style="padding:5px 10px;border:1px solid #d9dee5;text-align:right">{{ new_count }}</td>
+      </tr>
+      {% endif %}
+      <tr style="background:#eef2f6;font-weight:700">
+        <td style="padding:5px 10px;border:1px solid #d9dee5">Cash {{ money(total_cash) }} &nbsp;·&nbsp; Card {{ money(total_card) }}</td>
+        <td style="padding:5px 10px;border:1px solid #d9dee5;text-align:right">{{ money(total_cash + total_card) }}</td>
+      </tr>
+    </table>
+
+    {% if coach_counts %}
+    <div style="font-size:14px;font-weight:700;margin-bottom:4px">Coaches</div>
+    <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin-bottom:16px">
+      {% for name, cnt in coach_counts %}
+      <tr>
+        <td style="padding:4px 10px;border:1px solid #d9dee5">{{ name }}</td>
+        <td style="padding:4px 10px;border:1px solid #d9dee5;text-align:right">{{ cnt }} session{{ 's' if cnt != 1 }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if injured %}
+    <div style="font-size:14px;font-weight:700;color:#b91c1c;margin-bottom:4px">Left injured</div>
+    <div style="font-size:13px;margin-bottom:16px">
+      {% for d, n in injured %}{{ n }} ({{ d.strftime('%a %d %b') }}){{ ', ' if not loop.last }}{% endfor %}
+    </div>
+    {% endif %}
+
+    <div style="font-size:14px;font-weight:700;margin-bottom:4px">Session by session</div>
+    <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;width:100%">
+      <tr style="background:#1a3a5c;color:#ffffff">
+        <td style="padding:5px 10px;border:1px solid #1a3a5c">Date</td>
+        <td style="padding:5px 10px;border:1px solid #1a3a5c">Session</td>
+        <td style="padding:5px 10px;border:1px solid #1a3a5c;text-align:right">Players</td>
+        <td style="padding:5px 10px;border:1px solid #1a3a5c;text-align:right">Cash</td>
+        <td style="padding:5px 10px;border:1px solid #1a3a5c;text-align:right">Card</td>
+      </tr>
+      {% for r in rows %}
+      <tr {% if loop.index is even %}style="background:#f4f6f9"{% endif %}>
+        <td style="padding:4px 10px;border:1px solid #d9dee5">{{ r.date.strftime('%a %d %b') }}</td>
+        <td style="padding:4px 10px;border:1px solid #d9dee5">{{ r.name }}</td>
+        <td style="padding:4px 10px;border:1px solid #d9dee5;text-align:right">{{ r.players }}</td>
+        <td style="padding:4px 10px;border:1px solid #d9dee5;text-align:right">{{ money(r.cash) }}</td>
+        <td style="padding:4px 10px;border:1px solid #d9dee5;text-align:right">{{ money(r.card) }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  {% endif %}
+
+  <div style="margin-top:16px;font-size:11px;color:#9ca3af">Sent from the club's Club Training app.</div>
+  </div>
+</div>

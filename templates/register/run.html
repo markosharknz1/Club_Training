@@ -138,6 +138,7 @@
                 {{ a.payment_type }}
               </span>
               {% if a.new_member %}<span class="badge bg-warning text-dark" style="font-size:.65rem">NEW</span>{% endif %}
+              {% if a.left_injured %}<span class="badge bg-danger" style="font-size:.65rem">left injured</span>{% endif %}
               {% else %}
               <span class="text-muted small fst-italic">not checked in</span>
               {% endif %}
@@ -155,7 +156,8 @@
                                {{ a.group_id or p.default_group_id or "null" }},
                                {{ tmpl.price_cash|float }}, {{ tmpl.price_card|float }},
                                {{ a.payment_type|tojson }}, {{ (a.amount|float) }},
-                               {{ "true" if a.new_member else "false" }})'>
+                               {{ "true" if a.new_member else "false" }},
+                               {{ "true" if a.left_injured else "false" }})'>
                 ✎
               </button>
               {% else %}
@@ -218,6 +220,13 @@
           <input class="form-check-input" type="checkbox" id="modal-new-member">
           <label class="form-check-label" for="modal-new-member">
             New player <span class="text-muted small">(first time at the club)</span>
+          </label>
+        </div>
+        {# Only meaningful once checked in — a duty-of-care record #}
+        <div class="form-check mb-3 d-none" id="left-injured-row">
+          <input class="form-check-input" type="checkbox" id="modal-left-injured">
+          <label class="form-check-label" for="modal-left-injured">
+            Left injured <span class="text-muted small">(had to leave because of an injury)</span>
           </label>
         </div>
 
@@ -340,7 +349,7 @@ const AMOUNT_TYPES = new Set({{ AMOUNT_TYPES | tojson }});
 
 // ── Open check-in modal ─────────────────────────────────────────────
 function openModal(playerId, playerName, defaultGroupId, cashPrice, cardPrice,
-                   existingType, existingAmount, existingNewMember) {
+                   existingType, existingAmount, existingNewMember, existingLeftInjured) {
   currentPlayerId = playerId;
   isCheckedIn     = existingType !== null && existingType !== undefined;
   isVoucherCheckin = existingType === 'Sports Voucher';
@@ -352,6 +361,9 @@ function openModal(playerId, playerName, defaultGroupId, cashPrice, cardPrice,
   document.getElementById('modal-error').classList.add('d-none');
   // "New player" always starts unticked; keep the saved flag when editing
   document.getElementById('modal-new-member').checked = isCheckedIn ? !!existingNewMember : false;
+  // "Left injured" only applies to someone already checked in
+  document.getElementById('left-injured-row').classList.toggle('d-none', !isCheckedIn);
+  document.getElementById('modal-left-injured').checked = isCheckedIn ? !!existingLeftInjured : false;
 
   // Set group
   const grpSel = document.getElementById('modal-group');
@@ -460,11 +472,13 @@ function confirmCheckin() {
   const amount   = parseFloat(document.getElementById('modal-amount').value) || 0;
   const groupId  = document.getElementById('modal-group').value || null;
   const playerId = currentPlayerId;
+  const newMember = document.getElementById('modal-new-member').checked;
+  const leftInjured = isCheckedIn && document.getElementById('modal-left-injured').checked;
 
   fetch('/register/' + SD_ID + '/checkin', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ player_id: playerId, payment_type: selectedType, amount, group_id: groupId, new_member: document.getElementById('modal-new-member').checked }),
+    body: JSON.stringify({ player_id: playerId, payment_type: selectedType, amount, group_id: groupId, new_member: newMember, left_injured: leftInjured }),
   })
   .then(r => r.json())
   .then(data => {
@@ -474,7 +488,7 @@ function confirmCheckin() {
       return;
     }
     bootstrap.Modal.getInstance(document.getElementById('checkinModal')).hide();
-    updateRow(playerId, selectedType, amount, groupId, document.getElementById('modal-new-member').checked);
+    updateRow(playerId, selectedType, amount, groupId, newMember, leftInjured);
     updateTotals(data.totals);
   });
 }
@@ -499,14 +513,15 @@ function undoCheckin() {
 // ── Update a player row ─────────────────────────────────────────────
 const COLORS = {{ PAYMENT_COLORS | tojson }};
 
-function updateRow(playerId, payType, amount, groupId, newMember) {
+function updateRow(playerId, payType, amount, groupId, newMember, leftInjured) {
   const row = document.querySelector(`tr[data-player-id="${playerId}"]`);
   if (!row) return;
   row.classList.add('checked-row');
   // Payment cell
   const payCell = row.cells[3];
   payCell.innerHTML = `<span class="badge bg-${COLORS[payType] || 'secondary'} me-1">${payType}</span>`
-    + (newMember ? '<span class="badge bg-warning text-dark" style="font-size:.65rem">NEW</span>' : '');
+    + (newMember ? '<span class="badge bg-warning text-dark" style="font-size:.65rem">NEW</span>' : '')
+    + (leftInjured ? ' <span class="badge bg-danger" style="font-size:.65rem">left injured</span>' : '');
   // Amount cell
   const amtCell = row.cells[4];
   amtCell.textContent = (payType === 'Cash' || payType === 'Card') ? parseFloat(amount).toFixed(2) : '';
@@ -525,7 +540,7 @@ function updateRow(playerId, payType, amount, groupId, newMember) {
   btn.onclick = () => openModal(playerId, row.querySelector('.fw-semibold').textContent.trim(),
     gId, parseFloat(document.getElementById('modal-cash-price').value),
     parseFloat(document.getElementById('modal-card-price').value),
-    payType, amount, newMember);
+    payType, amount, newMember, leftInjured);
 }
 
 function clearRow(playerId) {

@@ -736,6 +736,47 @@ own machine and demo to other club members (e.g. "Carol").
     (C:\Claude\.claude\launch.json entry `club-training-preview`, scratchpad preview_ct.py,
     port 7461 — session-level launch.json, NOT the repo's) — never against the real DB.
 
+43. **v1.11.0 — second-PC network access + companion repo, emailed day/month reports,
+    left-injured + closed-session removal, email-provider guidance** (several user asks in one
+    release). (a) NETWORK: see commit "Network access for a second check-in PC" — Setting
+    `network_access`/`network_pin`/`network_port`, `_network_bind()` picks 0.0.0.0:fixed-port
+    vs local-only, `@app.before_request _network_gate` + `/network-login` (PIN, 180-day
+    session, 10-fail lockout), per-install `app_secret`, SQLite 15s busy timeout, security.html
+    card shows hostname+IPs. `/__alive` + `/static` stay PIN-EXEMPT (companion probe + login
+    assets). Live-verified over the machine's real LAN IP. **Companion = NEW private repo
+    markosharknz1/Club_Training_Companion at C:\Claude\Club_Training_Companion — two .cmd
+    files + connect.html + icon, a straight port of Session_Organiser_Companion (NOT the
+    python-runtime pattern): Edge app window on file://connect.html, probes
+    `/static/icons/sports/badminton.svg` by Image load, localStorage remembers the host,
+    .gitattributes forces CRLF on .cmd + export-ignores dev files; release.yml = git archive
+    zip + sha + crazy-max VirusTotal action (user adds VT_API_KEY). Live-verified end-to-end
+    with the real .cmd: connect → PIN → app; graceful-close relaunch goes straight in (a
+    FORCE-killed Edge loses its cookies — test-harness artifact).** (b) REPORTS: History page
+    "Email a report" card → POST `/history/email-report` (day|month scope, recipients
+    remembered in Setting `report_recipients`, provider select) → module-level
+    `_report_day_data`/`_report_month_data`/`_report_text` + `templates/report_email.html`
+    (inline-styled HTML; payments w/ $ totals, coaches, new players, injured, notes,
+    month per-session table). **Coaches come from CoachAttendance — `sd.coaches`
+    (_sd_coaches table) is a LEGACY relation nothing ever writes**; detail.html's Coaches
+    card was silently always "None recorded" until switched to `sd.coach_attendance`.
+    (c) CHECK-IN: `attendance.left_injured` column (+ migration) settable from all three
+    surfaces (day modal, register ✎, closed-session modal — only shown once checked in),
+    red badge everywhere, feeds reports. `/register/<sd>/attendance/<att>/remove` deletes a
+    record on OPEN OR CLOSED sessions (payment gone, voucher session returned) — "Remove
+    from this session" button in the detail modal. **SECOND tojson-attribute bug found: day
+    page's `data-checkin="{{ dict|tojson }}"` truncated at the first `"`, so JSON.parse in
+    the dblclick handler threw — DOUBLE-CLICKING A CHECKED-IN PLAYER ON THE DAY PAGE DID
+    NOTHING (the user's actual complaint). Day-page modal opens on DOUBLE-click; right-click
+    is the player-info/edit menu.** Badges moved OUTSIDE `.fw-semibold` (JS reads the player
+    name from it — "Demo Alpha left injured" was appearing in the modal title; NEW had the
+    same flaw). (d) EMAIL SETTINGS: provider cards got "What you need" numbered rundowns +
+    links (smtp2go.com, mailgun.com+DNS/domain, Google app passwords), "Default provider"
+    label + "default" badge on its card. Suites in session scratchpad: test_v111_features.py
+    (28), test_network.py (23), test_edit_payment.py (23). **Fixture lesson: `auto_close_stale`
+    (before_request) closes OPEN sessions dated before today on EVERY request — open-session
+    test fixtures must use date.today()**, and test JS must not use toISOString() for "today"
+    (UTC vs local, the Scheduler lesson).
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

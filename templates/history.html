@@ -34,6 +34,60 @@
   </div>
 </form>
 
+{# ── Email a report ─────────────────────────────────────────────────── #}
+<div class="card shadow-sm border-0 mb-3" style="max-width:720px">
+  <div class="card-header fw-semibold">Email a report</div>
+  <div class="card-body py-3">
+    {% if email_ready %}
+    <form method="post" action="/history/email-report" class="row g-2 align-items-end">
+      <div class="col-auto">
+        <label class="form-label small fw-semibold mb-1">Report</label>
+        <select name="scope" id="report-scope" class="form-select form-select-sm"
+                onchange="document.getElementById('report-date-col').classList.toggle('d-none', this.value !== 'day');
+                          document.getElementById('report-month-col').classList.toggle('d-none', this.value !== 'month')">
+          <option value="day">End of day</option>
+          <option value="month">Whole month</option>
+        </select>
+      </div>
+      <div class="col-auto" id="report-date-col">
+        <label class="form-label small fw-semibold mb-1">Day</label>
+        <input type="date" name="report_date" class="form-control form-control-sm"
+               value="{{ today.isoformat() }}">
+      </div>
+      <div class="col-auto d-none" id="report-month-col">
+        <label class="form-label small fw-semibold mb-1">Month</label>
+        <input type="month" name="report_month" class="form-control form-control-sm"
+               value="{{ today.strftime('%Y-%m') }}">
+      </div>
+      <div class="col">
+        <label class="form-label small fw-semibold mb-1">Send to</label>
+        <input type="text" name="recipients" class="form-control form-control-sm"
+               value="{{ report_recipients }}" placeholder="treasurer@club.org, president@club.org">
+      </div>
+      {% if report_providers | length > 1 %}
+      <div class="col-auto">
+        <label class="form-label small fw-semibold mb-1">Via</label>
+        <select name="provider" class="form-select form-select-sm">
+          {% for key, label in report_providers %}
+          <option value="{{ key }}" {% if key == report_default_provider %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <div class="col-auto">
+        <button class="btn btn-primary btn-sm">Send report</button>
+      </div>
+      <div class="form-text mt-1 mb-0">Payments, coaches, new players and any injuries —
+        a readable summary for the committee. Addresses are remembered for next time.</div>
+    </form>
+    {% else %}
+    <p class="text-muted small mb-0">Set up an email provider first under
+      <a href="/settings/email">Setup → Club Settings → Email</a>, then day and month
+      summary reports can be emailed from here.</p>
+    {% endif %}
+  </div>
+</div>
+
 {% if dates %}
 <div class="card shadow-sm border-0">
   <div class="table-responsive">
