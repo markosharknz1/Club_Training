@@ -1,41 +1,21 @@
-# Club Training v1.11.0
+# Club Training v1.12.0
 
-## A second check-in desk, on another PC
+## Vouchers pick themselves
 
-Setup → Club Settings → Security & Privacy gains **Allow other computers on
-this network**. Turn it on, set a **check-in PIN** (required — the database
-holds kids' details), restart, and any other PC on the club's network can
-run the same register through the new
-[Club Training Companion](https://github.com/markosharknz1/Club_Training_Companion)
-(or a browser). One database, both desks live. Off by default; other
-machines must enter the PIN once; ten wrong attempts locks them out.
+Opening check-in for a child who has a Sports Voucher with sessions left now
+**pre-selects Sports Voucher automatically**, with the voucher already chosen
+and a green note saying which one — no more forgetting to look. Clicking any
+other payment type overrides it, and editing an existing check-in never
+changes what was recorded. Works on both the day check-in window and the
+session register.
 
-## Emailed day and month reports
+## First visit is free — properly
 
-History gains **Email a report**: an end-of-day or whole-month summary —
-payments by type with cash/card totals, coaches present, new players, and
-any injuries — sent to addresses you choose (remembered for next time),
-through your default or chosen email provider.
-
-## Check-in fixes and duty-of-care
-
-- **Fixed: tapping an already checked-in player on the check-in page did
-  nothing**, so a wrongly added kid couldn't be removed or edited. Works
-  now — Remove deletes the record, payment details and all, and gives a
-  voucher session back.
-- Closed sessions: the session summary's edit window gains **Remove from
-  this session** for mistakes found after the night is closed.
-- New **Left injured** tick on a checked-in player (check-in page, register
-  and closed-session summary) — shows as a red badge and in the emailed
-  reports.
-- The session summary's Coaches card now actually lists the coaches who
-  were marked present.
-
-## Email setup made clearer
-
-Each provider card (SMTP2GO, Mailgun, Gmail) now spells out exactly what
-you need — account, domain or app password — with links to the right pages,
-and the default provider is labelled on its card.
+Ticking **New player (first time at the club)** now sets the amount to
+**$0** ("first visit is free") instead of recording the session price, so
+first-timers no longer show up with a dollar figure in totals and reports.
+Untick it and the session price comes back; on the register the amount can
+still be typed over if your club does charge.
 
 ## Installing / upgrading
 

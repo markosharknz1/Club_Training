@@ -777,6 +777,26 @@ own machine and demo to other club members (e.g. "Carol").
     test fixtures must use date.today()**, and test JS must not use toISOString() for "today"
     (UTC vs local, the Scheduler lesson).
 
+44. **v1.12.0 — voucher auto-select at check-in + "first visit is free"** (user: "if there is
+    an available sports voucher, can this be auto selected and popped up"; "first time/free is
+    not being correct flagged - they are being selected with a dollar figure"). Both check-in
+    modals (day/checkin.html + register/run.html): on a FRESH check-in (never when editing an
+    existing record), if the player has a voucher with sessions_remaining > 0, Sports Voucher
+    is pre-selected — day page via new `autoVoucherCheck()` fetch + green `#auto-voucher-note`
+    ("✓ Sports Voucher auto-selected — <label>"); run page piggybacks on loadVoucherInfo's
+    existing fetch (its green "will use" line is the note). Guard: `payTypeTouched` flag set
+    only by the pay buttons' inline onclick (now `selectPayType('X', true)` / `selectType('X',
+    undefined, true)` — the fromUser param) so a desk click always wins over the async flip;
+    pid-vs-currentPlayerId guard against modal reuse. "New player" tick now means FREE: day
+    modal `refreshAmount()` shows "0 — first visit is free" (amount hidden-input 0) and
+    restores session price on untick; run page same via checkbox change listener + selectType
+    honouring the tick (its editable amount can still be typed over). No server change —
+    register_checkin already stores the posted amount. Live-verified on seeded preview: auto
+    pick + note, Cash override hides note, tick→0/untick→price, saved record Cash $0 +
+    new_member, no flip for already-checked-in or voucher-less players, run page both
+    behaviours. NOTE: day modal amount is display-only (hidden input) — the tick is the ONLY
+    way it becomes 0 there, by design.
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

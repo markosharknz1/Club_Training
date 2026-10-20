@@ -242,11 +242,12 @@
           <div class="d-flex flex-wrap gap-2" id="pay-btns">
             {% for pt in PAYMENT_TYPES %}
             <button type="button" class="btn btn-outline-secondary pay-btn"
-                    data-type="{{ pt }}" onclick="selectPayType('{{ pt }}')">
+                    data-type="{{ pt }}" onclick="selectPayType('{{ pt }}', true)">
               {{ pt }}
             </button>
             {% endfor %}
           </div>
+          <div id="auto-voucher-note" class="small text-success mt-2 d-none"></div>
         </div>
 
         <div class="mb-3 d-none" id="amount-row">
@@ -388,6 +389,7 @@ let currentPlayerId   = null;
 let currentVoucherList = [];
 let voucherPromptShown = false;
 let isCheckedIn        = false;
+let payTypeTouched     = false;   // the desk clicked a payment type this modal
 let squarePollTimer    = null;
 let squareCheckoutId   = null;
 
@@ -419,8 +421,11 @@ function openCheckin(pid, name, currentSdId, currentGroupId, currentPayType, cur
   populateGroups(selectedSdId, currentGroupId);
 
   // Default to Card for new check-ins, keep existing payment type otherwise
+  payTypeTouched = false;
+  document.getElementById('auto-voucher-note').classList.add('d-none');
   const payType = currentPayType || DEFAULT_PAY;
   selectPayType(payType);
+  if (!isCheckedIn) autoVoucherCheck(pid);   // voucher on file? pre-select it
 
   document.getElementById('remove-btn').style.setProperty(
     'display', isCheckedIn ? 'inline-block' : 'none', 'important'
@@ -460,24 +465,58 @@ function getDefaultAmount(sdId, payType) {
   return payType === 'Card' ? sess.price_card : sess.price_cash;
 }
 
+// A ticked "New player" means the first visit is free — the amount follows
+// the tick, so first-timers are never recorded with a dollar figure.
+function refreshAmount() {
+  if (!AMOUNT_TYPES.has(selectedPayType)) return;
+  const amtInp     = document.getElementById('modal-amount');
+  const amtDisplay = document.getElementById('modal-amount-display');
+  if (document.getElementById('modal-new-member').checked) {
+    amtInp.value = 0;
+    amtDisplay.textContent = '0 — first visit is free';
+  } else {
+    const amt = Math.round(getDefaultAmount(selectedSdId, selectedPayType));
+    amtInp.value = amt;
+    amtDisplay.textContent = amt;
+  }
+}
+document.getElementById('modal-new-member').addEventListener('change', refreshAmount);
+
+// If the child has a Sports Voucher with sessions left, pre-select it on a
+// fresh check-in — the desk shouldn't have to remember to look.
+function autoVoucherCheck(pid) {
+  fetch(`/api/player/${pid}/vouchers`)
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok || pid !== currentPlayerId || payTypeTouched || isCheckedIn) return;
+      const avail = (data.vouchers || []).find(v => v.sessions_remaining > 0);
+      if (!avail) return;
+      selectPayType('Sports Voucher');
+      const note = document.getElementById('auto-voucher-note');
+      note.textContent = `✓ Sports Voucher auto-selected — ${avail.label}`;
+      note.classList.remove('d-none');
+    })
+    .catch(() => {});
+}
+
 // ── Select payment type ─────────────────────────────────────────────
-function selectPayType(type) {
+function selectPayType(type, fromUser) {
+  if (fromUser) {
+    payTypeTouched = true;
+    document.getElementById('auto-voucher-note').classList.add('d-none');
+  }
   selectedPayType = type;
   document.querySelectorAll('.pay-btn').forEach(btn => {
     const t = btn.dataset.type;
     btn.className = 'btn pay-btn ' + (t === type ? 'pay-' + t.replace(/\s+/g, '-') : 'btn-outline-secondary');
   });
-  const amtRow     = document.getElementById('amount-row');
-  const amtInp     = document.getElementById('modal-amount');
-  const amtDisplay = document.getElementById('modal-amount-display');
+  const amtRow = document.getElementById('amount-row');
   if (AMOUNT_TYPES.has(type)) {
     amtRow.classList.remove('d-none');
-    const amt = Math.round(getDefaultAmount(selectedSdId, type));
-    amtInp.value = amt;
-    amtDisplay.textContent = amt;
+    refreshAmount();
   } else {
     amtRow.classList.add('d-none');
-    amtInp.value = 0;
+    document.getElementById('modal-amount').value = 0;
   }
 
   const squareRow = document.getElementById('square-row');

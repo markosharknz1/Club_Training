@@ -204,7 +204,7 @@
             <button type="button"
                     class="btn btn-outline-secondary pay-btn"
                     data-type="{{ pt }}"
-                    onclick="selectType('{{ pt }}')">
+                    onclick="selectType('{{ pt }}', undefined, true)">
               {{ pt }}
             </button>
             {% endfor %}
@@ -353,6 +353,7 @@ function openModal(playerId, playerName, defaultGroupId, cashPrice, cardPrice,
   currentPlayerId = playerId;
   isCheckedIn     = existingType !== null && existingType !== undefined;
   isVoucherCheckin = existingType === 'Sports Voucher';
+  payTypeTouched  = false;
   loadVoucherInfo(playerId);
   document.getElementById('modal-player-id').value  = playerId;
   document.getElementById('modal-name').textContent  = playerName;
@@ -406,6 +407,11 @@ function loadVoucherInfo(playerId) {
       voucherState = { playerId, pending: false, loaded: true,
                        totalLeft: total, pickLabel: pick ? pick.label : '' };
       if (btn) btn.textContent = `Sports Voucher (${total} left)`;
+      // Fresh check-in and a voucher has sessions left? Pre-select it —
+      // the green "will use …" line below explains which one.
+      if (!isCheckedIn && !payTypeTouched && total > 0) {
+        selectType('Sports Voucher');
+      }
       renderVoucherInfo();
     })
     .catch(() => { voucherState.pending = false; renderVoucherInfo(); });
@@ -435,19 +441,24 @@ function renderVoucherInfo() {
 }
 
 // ── Select payment type ─────────────────────────────────────────────
-function selectType(type, amount) {
+let payTypeTouched = false;   // the desk clicked a payment type this modal
+
+function selectType(type, amount, fromUser) {
+  if (fromUser) payTypeTouched = true;
   selectedType = type;
   // Style buttons
   document.querySelectorAll('.pay-btn').forEach(btn => {
     const t = btn.dataset.type;
     btn.className = 'btn pay-btn ' + (t === type ? 'pay-' + t.replace(' ','-') : 'btn-outline-secondary');
   });
-  // Amount field
+  // Amount field — a ticked "New player" means the first visit is free
   const amtRow = document.getElementById('amount-row');
   const amtInp = document.getElementById('modal-amount');
   if (AMOUNT_TYPES.has(type)) {
     amtRow.style.display = '';
-    if (amount !== undefined && amount !== null) {
+    if (document.getElementById('modal-new-member').checked) {
+      amtInp.value = 0;
+    } else if (amount !== undefined && amount !== null) {
       amtInp.value = Math.round(parseFloat(amount));
     } else {
       const price = type === 'Cash'
@@ -461,6 +472,20 @@ function selectType(type, amount) {
   }
   renderVoucherInfo();
 }
+
+// Tick/untick "New player": free on tick, session price back on untick
+document.getElementById('modal-new-member').addEventListener('change', function () {
+  if (!AMOUNT_TYPES.has(selectedType)) return;
+  const amtInp = document.getElementById('modal-amount');
+  if (this.checked) {
+    amtInp.value = 0;
+  } else {
+    const price = selectedType === 'Cash'
+      ? parseFloat(document.getElementById('modal-cash-price').value)
+      : parseFloat(document.getElementById('modal-card-price').value);
+    amtInp.value = Math.round(price);
+  }
+});
 
 // ── Confirm check-in ────────────────────────────────────────────────
 function confirmCheckin() {
