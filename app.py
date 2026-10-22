@@ -21,8 +21,8 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
 
-APP_VERSION = '1.12.0'
-APP_RELEASED = '20 October 2026'   # bump alongside APP_VERSION at release time
+APP_VERSION = '1.13.0'
+APP_RELEASED = '23 October 2026'   # bump alongside APP_VERSION at release time
 
 # ─── Branding ───────────────────────────────────────────────────────
 # Bundled club icons (static/icons/sports/<key>.svg — see LICENSE.md there).
@@ -2618,13 +2618,13 @@ def create_app():
         elif section == 'vouchers':
             Setting.set('voucher_scheme_name',
                         request.form.get('voucher_scheme_name', '').strip()[:40])
-            for key, default in (('voucher_amount', '100'),
-                                 ('voucher_sessions', '10'),
-                                 ('voucher_max_active', '2'),
-                                 ('voucher_max_per_year', '2')):
+            for key, default, floor in (('voucher_amount', '100', 1),
+                                        ('voucher_sessions', '10', 1),
+                                        ('voucher_max_active', '2', 0),
+                                        ('voucher_max_per_year', '2', 0)):
                 raw = request.form.get(key, '').strip()
                 try:
-                    val = max(1, int(raw))
+                    val = max(floor, int(raw or default))
                 except ValueError:
                     val = int(default)
                 Setting.set(key, str(val))
@@ -3768,23 +3768,29 @@ def _voucher_label():
 
 def _voucher_label_plural():
     label = _voucher_label()
-    return label if label.lower().endswith('s') else label + 's'
+    low = label.lower()
+    if low.endswith('ss'):          # Session Pass -> Session Passes
+        return label + 'es'
+    if low.endswith('s'):           # Active Kids stays Active Kids
+        return label
+    return label + 's'              # Sports Voucher -> Sports Vouchers
 
 
 def _voucher_defaults():
     """Voucher rules, configurable in Settings → Vouchers (falling back to the
     original hardcoded Sports Voucher defaults)."""
-    def _int_setting(key, fallback):
+    def _int_setting(key, fallback, floor=1):
         try:
-            return max(1, int(Setting.get(key, '') or fallback))
+            return max(floor, int(Setting.get(key, '') or fallback))
         except ValueError:
             return fallback
     return {
         'scheme_name':  (Setting.get('voucher_scheme_name', '') or '').strip(),
         'amount':       _int_setting('voucher_amount', DEFAULT_VOUCHER_AMOUNT),
         'sessions':     _int_setting('voucher_sessions', DEFAULT_VOUCHER_SESSIONS),
-        'max_active':   _int_setting('voucher_max_active', 2),
-        'max_per_year': _int_setting('voucher_max_per_year', 2),
+        # 0 = no limit (pre-paid session packs a club sells have no yearly cap)
+        'max_active':   _int_setting('voucher_max_active', 2, floor=0),
+        'max_per_year': _int_setting('voucher_max_per_year', 2, floor=0),
     }
 
 
@@ -3794,11 +3800,11 @@ def _voucher_limit_error(player_id, issued_date):
     vd = _voucher_defaults()
     vouchers = Voucher.query.filter_by(player_id=player_id).all()
     active_count = sum(1 for v in vouchers if v.sessions_remaining > 0)
-    if active_count >= vd['max_active']:
+    if vd['max_active'] and active_count >= vd['max_active']:
         return (f'This child already has {vd["max_active"]} active '
                 'vouchers. Use one up before creating another.')
     year_count = sum(1 for v in vouchers if v.date_issued.year == issued_date.year)
-    if year_count >= vd['max_per_year']:
+    if vd['max_per_year'] and year_count >= vd['max_per_year']:
         return (f'This child has already been issued {vd["max_per_year"]} '
                 f'vouchers in {issued_date.year} (the yearly maximum).')
     return None

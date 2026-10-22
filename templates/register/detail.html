@@ -260,7 +260,7 @@ function openPayEdit(attId, playerId, name, currentType, currentAmount, leftInju
 
 function peRemove() {
   const name = document.getElementById('pe-name').textContent;
-  if (!confirm(`Remove ${name} from this session? Their payment record goes too, and a voucher session is given back.`)) return;
+  if (!confirm(`Remove ${name} from this session? Their payment record goes too, and any ${VOUCHER_LABEL} session is given back.`)) return;
   fetch('/register/{{ sd.id }}/attendance/' + peAttId + '/remove', { method: 'POST' })
     .then(r => r.json())
     .then(data => {
@@ -330,13 +330,13 @@ function renderPeVoucherInfo() {
   } else if (peVoucher.totalLeft > 0) {
     const s = peVoucher.totalLeft === 1 ? '' : 's';
     div.className = 'small mt-2 text-success';
-    div.textContent = `✓ ${peVoucher.totalLeft} voucher session${s} left — will use ${peVoucher.pickLabel}`;
+    div.textContent = `✓ ${peVoucher.totalLeft} session${s} left — will use ${peVoucher.pickLabel}`;
   } else if (peOriginalType === 'Sports Voucher') {
     div.className = 'small mt-2 text-muted';
-    div.textContent = 'This check-in already uses the last remaining voucher session.';
+    div.textContent = 'This check-in already uses the last remaining session.';
   } else {
     div.className = 'small mt-2 text-danger fw-semibold';
-    div.textContent = 'No voucher sessions remaining for this player — register one on the Vouchers page first.';
+    div.textContent = `No ${VOUCHER_LABEL} sessions remaining for this player — register one on the Vouchers page first.`;
   }
 }
 

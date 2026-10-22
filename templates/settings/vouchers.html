@@ -19,7 +19,10 @@
                  value="{{ vd.scheme_name }}" placeholder="Sports Voucher">
           <div class="form-text">Shown on the check-in buttons, badges, the Vouchers page,
             PDFs and reports — e.g. <em>Active Kids</em> or <em>FairPlay Voucher</em>.
-            Leave blank for Sports Voucher. Records themselves don't change.</div>
+            No scheme in your area? Call it <em>Session Pass</em> or <em>Pre-paid Pass</em>
+            and sell blocks of sessions yourself (set the price and session count below,
+            and the limits to 0). Leave blank for Sports Voucher. Records themselves
+            don't change.</div>
         </div>
         <div class="col-6">
           <label class="form-label fw-semibold">Voucher value ($)</label>
@@ -33,16 +36,17 @@
         </div>
         <div class="col-6">
           <label class="form-label fw-semibold">Max active at once</label>
-          <input type="number" name="voucher_max_active" class="form-control" min="1" step="1"
+          <input type="number" name="voucher_max_active" class="form-control" min="0" step="1"
                  value="{{ vd.max_active }}">
           <div class="form-text">A child can't register another voucher while they have this
-            many with sessions remaining.</div>
+            many with sessions remaining. <strong>0 = no limit.</strong></div>
         </div>
         <div class="col-6">
           <label class="form-label fw-semibold">Max per calendar year</label>
-          <input type="number" name="voucher_max_per_year" class="form-control" min="1" step="1"
+          <input type="number" name="voucher_max_per_year" class="form-control" min="0" step="1"
                  value="{{ vd.max_per_year }}">
-          <div class="form-text">Unused sessions still carry over to the next year.</div>
+          <div class="form-text">Unused sessions still carry over to the next year.
+            <strong>0 = no limit.</strong></div>
         </div>
       </div>
       <button type="submit" class="btn btn-primary">Save</button>

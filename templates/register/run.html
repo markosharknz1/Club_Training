@@ -432,13 +432,13 @@ function renderVoucherInfo() {
   } else if (voucherState.totalLeft > 0) {
     const s = voucherState.totalLeft === 1 ? '' : 's';
     div.className = 'small mt-2 text-success';
-    div.textContent = `✓ ${voucherState.totalLeft} voucher session${s} left — will use ${voucherState.pickLabel}`;
+    div.textContent = `✓ ${voucherState.totalLeft} session${s} left — will use ${voucherState.pickLabel}`;
   } else if (isVoucherCheckin) {
     div.className = 'small mt-2 text-muted';
-    div.textContent = 'This check-in already uses the last remaining voucher session.';
+    div.textContent = 'This check-in already uses the last remaining session.';
   } else {
     div.className = 'small mt-2 text-danger fw-semibold';
-    div.textContent = 'No voucher sessions remaining for this player — register one on the Vouchers page first.';
+    div.textContent = `No ${VOUCHER_LABEL} sessions remaining for this player — register one on the Vouchers page first.`;
   }
 }
 

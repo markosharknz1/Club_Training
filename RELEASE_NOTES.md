@@ -1,30 +1,18 @@
-# Club Training v1.12.0
+# Club Training v1.13.0
 
-## Call the voucher scheme whatever your region does
+## Pre-paid session passes — no voucher scheme needed
 
-Clubs outside South Australia run the same idea under different names — NSW
-*Active Kids*, Queensland *FairPlay*, WA *KidSport*… Setup → Club Settings →
-Vouchers now has a **Scheme name** field: type yours once and it appears on
-the check-in buttons, badges, the Vouchers page, PDFs and emailed reports.
-The voucher value, sessions and per-child limits were already configurable
-there. Existing records never change; leave it blank for Sports Voucher.
+For clubs in areas without a government voucher scheme, the voucher system
+now works as a club-run pre-paid pass. In Setup → Club Settings → Vouchers:
+name it (e.g. **Session Pass**), set your own price and sessions per pass,
+and set both per-child limits to **0 = no limit** so families can buy as
+many as they like. Everything else just works: passes show on the check-in
+buttons, auto-select when a child has sessions left, count down one session
+per check-in, and appear in PDFs and emailed reports.
 
-## Vouchers pick themselves
-
-Opening check-in for a child who has a Sports Voucher with sessions left now
-**pre-selects Sports Voucher automatically**, with the voucher already chosen
-and a green note saying which one — no more forgetting to look. Clicking any
-other payment type overrides it, and editing an existing check-in never
-changes what was recorded. Works on both the day check-in window and the
-session register.
-
-## First visit is free — properly
-
-Ticking **New player (first time at the club)** now sets the amount to
-**$0** ("first visit is free") instead of recording the session price, so
-first-timers no longer show up with a dollar figure in totals and reports.
-Untick it and the session price comes back; on the register the amount can
-still be typed over if your club does charge.
+Wording across the app (check-in balance lines, the Vouchers page, buttons)
+now follows your scheme name instead of assuming "Sports Voucher", and
+"Session Pass" pluralises properly. SA clubs see no change.
 
 ## Installing / upgrading
 

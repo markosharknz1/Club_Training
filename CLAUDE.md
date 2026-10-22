@@ -816,6 +816,25 @@ own machine and demo to other club members (e.g. "Carol").
     context processor reads `request`, so render_template in tests needs
     app.test_request_context().**
 
+46. **v1.13.0 — pre-paid session passes (vouchers without a scheme)** (user: "for use where
+    the voucher system does not exist - Can it be labelled a pre-paid sessions, with an
+    amount and a number of sessions?"). Builds on entry 45's scheme name: per-child limits
+    `voucher_max_active`/`voucher_max_per_year` now accept **0 = no limit** (_int_setting
+    gained a `floor` param — amount/sessions keep floor 1; _voucher_limit_error skips a
+    check when its limit is 0; settings save loop carries per-key floors; inputs min="0"
+    with "0 = no limit" help). Remaining voucher-flavoured wording made scheme-neutral:
+    "+ New {{ voucher_label }}" (vouchers page + day modal create button), vouchers page
+    intro rewritten neutral, day summary card caption = voucher_label, modal balance lines
+    drop the word "voucher" ("✓ N sessions left — will use …" / `No ${VOUCHER_LABEL}
+    sessions remaining`), detail remove-confirm uses VOUCHER_LABEL.
+    **_voucher_label_plural got real rules: ends in 'ss' → +'es' (Session Pass→Session
+    Passes), ends in 's' → unchanged (Active Kids), else +'s'.** Settings help now suggests
+    "Session Pass / Pre-paid Pass + limits 0" for schemeless regions. Suite extended to 30
+    checks (scratchpad test_scheme_name.py); live pass as 'Session Pass' (page title/
+    heading/button all renamed; generic lowercase "voucher" record-noun deliberately kept in
+    footers/Hide button). **Test gotcha: JS template literals like `No ${VOUCHER_LABEL}...`
+    appear VERBATIM in served page source — don't assert their absence.**
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually
