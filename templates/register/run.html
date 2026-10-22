@@ -43,7 +43,7 @@
         {% for pt, cnt in sd.payment_summary.items() %}
           {% if pt not in ['Cash','Card'] %}
           <div class="d-flex justify-content-between">
-            <span>{{ pt }}</span><span>{{ cnt }}</span>
+            <span>{{ pt | pay_label }}</span><span>{{ cnt }}</span>
           </div>
           {% endif %}
         {% endfor %}
@@ -135,7 +135,7 @@
             <td>
               {% if a %}
               <span class="badge bg-{{ PAYMENT_COLORS.get(a.payment_type,'secondary') }} me-1">
-                {{ a.payment_type }}
+                {{ a.payment_type | pay_label }}
               </span>
               {% if a.new_member %}<span class="badge bg-warning text-dark" style="font-size:.65rem">NEW</span>{% endif %}
               {% if a.left_injured %}<span class="badge bg-danger" style="font-size:.65rem">left injured</span>{% endif %}
@@ -205,7 +205,7 @@
                     class="btn btn-outline-secondary pay-btn"
                     data-type="{{ pt }}"
                     onclick="selectType('{{ pt }}', undefined, true)">
-              {{ pt }}
+              {{ pt | pay_label }}
             </button>
             {% endfor %}
           </div>
@@ -304,7 +304,7 @@
             <tbody>
               {% for pt, cnt in sd.payment_summary.items() %}
               <tr>
-                <td><span class="badge bg-{{ PAYMENT_COLORS.get(pt,'secondary') }}">{{ pt }}</span></td>
+                <td><span class="badge bg-{{ PAYMENT_COLORS.get(pt,'secondary') }}">{{ pt | pay_label }}</span></td>
                 <td class="fw-semibold">{{ cnt }} player{{ 's' if cnt != 1 }}</td>
               </tr>
               {% endfor %}
@@ -340,6 +340,8 @@
 {% block scripts %}
 <script>
 const SD_ID      = {{ sd.id }};
+const VOUCHER_LABEL = {{ voucher_label | tojson }};   // display name for 'Sports Voucher'
+const payLabel = pt => pt === 'Sports Voucher' ? VOUCHER_LABEL : pt;
 let selectedType = null;
 let currentPlayerId = null;
 let isCheckedIn  = false;
@@ -391,7 +393,7 @@ let voucherState = { playerId: null, pending: false, loaded: false, totalLeft: 0
 function loadVoucherInfo(playerId) {
   voucherState = { playerId, pending: true, loaded: false, totalLeft: 0, pickLabel: '' };
   const btn = document.querySelector('.pay-btn[data-type="Sports Voucher"]');
-  if (btn) btn.textContent = 'Sports Voucher';
+  if (btn) btn.textContent = VOUCHER_LABEL;
   renderVoucherInfo();
   fetch('/api/player/' + playerId + '/vouchers')
     .then(r => r.json())
@@ -406,7 +408,7 @@ function loadVoucherInfo(playerId) {
       }
       voucherState = { playerId, pending: false, loaded: true,
                        totalLeft: total, pickLabel: pick ? pick.label : '' };
-      if (btn) btn.textContent = `Sports Voucher (${total} left)`;
+      if (btn) btn.textContent = `${VOUCHER_LABEL} (${total} left)`;
       // Fresh check-in and a voucher has sessions left? Pre-select it —
       // the green "will use …" line below explains which one.
       if (!isCheckedIn && !payTypeTouched && total > 0) {
@@ -544,7 +546,7 @@ function updateRow(playerId, payType, amount, groupId, newMember, leftInjured) {
   row.classList.add('checked-row');
   // Payment cell
   const payCell = row.cells[3];
-  payCell.innerHTML = `<span class="badge bg-${COLORS[payType] || 'secondary'} me-1">${payType}</span>`
+  payCell.innerHTML = `<span class="badge bg-${COLORS[payType] || 'secondary'} me-1">${payLabel(payType)}</span>`
     + (newMember ? '<span class="badge bg-warning text-dark" style="font-size:.65rem">NEW</span>' : '')
     + (leftInjured ? ' <span class="badge bg-danger" style="font-size:.65rem">left injured</span>' : '');
   // Amount cell
@@ -594,7 +596,7 @@ function updateTotals(t) {
   Object.entries(t.by_type).forEach(([pt, cnt]) => {
     if (pt !== 'Cash' && pt !== 'Card') {
       otherDiv.insertAdjacentHTML('beforeend',
-        `<div class="d-flex justify-content-between"><span>${pt}</span><span>${cnt}</span></div>`);
+        `<div class="d-flex justify-content-between"><span>${payLabel(pt)}</span><span>${cnt}</span></div>`);
     }
   });
 

@@ -797,6 +797,25 @@ own machine and demo to other club members (e.g. "Carol").
     behaviours. NOTE: day modal amount is display-only (hidden input) — the tick is the ONLY
     way it becomes 0 there, by design.
 
+45. **v1.12.0 (same release) — configurable voucher scheme name** (user: "deconstruct the
+    Sports Voucher system, so that I can use it in areas other than South Australia").
+    Setting `voucher_scheme_name` (Settings → Vouchers, blank = Sports Voucher; max 40 chars)
+    — **DISPLAY-ONLY: the stored payment_type stays the literal 'Sports Voucher' everywhere**
+    (attendance rows, `== 'Sports Voucher'` comparisons, JS data-type keys, PAYMENT_COLORS,
+    pay-Sports-Voucher CSS). Plumbing: module `_voucher_label()`/`_voucher_label_plural()`
+    (plural = +'s' unless already ends in s, so 'Active Kids' stays), Jinja filter
+    `pay_label` (maps only the voucher key), context globals `voucher_label`/
+    `voucher_label_plural`, `vd['scheme_name']` in _voucher_defaults. Display sites swept
+    (~40): the three modals' payment buttons (`{{ pt | pay_label }}`, data-type untouched),
+    all payment badges/summaries (run sidebar + close modal, detail breakdown + rows,
+    history mix), JS via `const VOUCHER_LABEL` (+ run.html `payLabel()`) for button
+    textContent/auto-select notes/prompt strings/updateTotals/updateRow, vouchers page +
+    New-voucher modal + import page headers (plural), players/import SV note, voucher PDF
+    heading, _resolve_checkin_voucher error, _report_text + report_email.html. 19-check
+    suite (scratchpad test_scheme_name.py) + live pass as 'Active Kids'. **Gotcha: the
+    context processor reads `request`, so render_template in tests needs
+    app.test_request_context().**
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

@@ -243,7 +243,7 @@
             {% for pt in PAYMENT_TYPES %}
             <button type="button" class="btn btn-outline-secondary pay-btn"
                     data-type="{{ pt }}" onclick="selectPayType('{{ pt }}', true)">
-              {{ pt }}
+              {{ pt | pay_label }}
             </button>
             {% endfor %}
           </div>
@@ -353,6 +353,7 @@ const SESSIONS    = {{ sessions_js | safe }};
 const AMOUNT_TYPES = new Set({{ AMOUNT_TYPES | tojson }});
 const PAY_COLORS  = {{ PAYMENT_COLORS | tojson }};
 const DEFAULT_PAY = 'Card';
+const VOUCHER_LABEL = {{ voucher_label | tojson }};   // display name for 'Sports Voucher'
 const GROUPS_ENABLED = {{ 'true' if groups_enabled else 'false' }};
 const ROW_COLS = GROUPS_ENABLED ? 3 : 2;
 const FIELD_CFG   = {{ field_cfg | tojson }};
@@ -493,7 +494,7 @@ function autoVoucherCheck(pid) {
       if (!avail) return;
       selectPayType('Sports Voucher');
       const note = document.getElementById('auto-voucher-note');
-      note.textContent = `✓ Sports Voucher auto-selected — ${avail.label}`;
+      note.textContent = `✓ ${VOUCHER_LABEL} auto-selected — ${avail.label}`;
       note.classList.remove('d-none');
     })
     .catch(() => {});
@@ -559,7 +560,7 @@ function loadVoucherOptions(playerId, preselectId) {
         emptyMsg.textContent = 'No voucher on file for this child.';
         emptyMsg.classList.remove('d-none');
         selectedVoucherId = null;
-        promptCreateVoucher('This child has no Sports Voucher on file.');
+        promptCreateVoucher(`This child has no ${VOUCHER_LABEL} on file.`);
         return;
       }
 
@@ -582,9 +583,9 @@ function loadVoucherOptions(playerId, preselectId) {
       selectedVoucherId = chosen;
 
       if (allUsedUp) {
-        emptyMsg.textContent = "This child's Sports Voucher is fully used (10/10).";
+        emptyMsg.textContent = `This child's ${VOUCHER_LABEL} is fully used (10/10).`;
         emptyMsg.classList.remove('d-none');
-        promptCreateVoucher("This child's Sports Voucher is fully used (10/10).");
+        promptCreateVoucher(`This child's ${VOUCHER_LABEL} is fully used (10/10).`);
       } else {
         updateVoucherWarning(data.vouchers.find(v => v.id === chosen));
       }

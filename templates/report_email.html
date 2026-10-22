@@ -23,7 +23,7 @@
         </tr>
         {% for pt, cnt in s.breakdown %}
         <tr>
-          <td style="padding:5px 10px;border:1px solid #d9dee5">{{ pt }}</td>
+          <td style="padding:5px 10px;border:1px solid #d9dee5">{{ pt | pay_label }}</td>
           <td style="padding:5px 10px;border:1px solid #d9dee5;text-align:right">{{ cnt }}</td>
         </tr>
         {% endfor %}
@@ -62,7 +62,7 @@
       </tr>
       {% for pt, cnt in type_counts %}
       <tr>
-        <td style="padding:5px 10px;border:1px solid #d9dee5">Paid by {{ pt }}</td>
+        <td style="padding:5px 10px;border:1px solid #d9dee5">Paid by {{ pt | pay_label }}</td>
         <td style="padding:5px 10px;border:1px solid #d9dee5;text-align:right">{{ cnt }}</td>
       </tr>
       {% endfor %}

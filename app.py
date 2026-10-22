@@ -334,6 +334,12 @@ def create_app():
 
     # ── Context ──────────────────────────────────────────────────────
 
+    @app.template_filter('pay_label')
+    def _pay_label_filter(pt):
+        """Display name for a payment type — maps the stored 'Sports
+        Voucher' key to the club's own scheme name."""
+        return _voucher_label() if pt == 'Sports Voucher' else pt
+
     @app.context_processor
     def _ctx():
         ep = request.endpoint or ''
@@ -360,6 +366,8 @@ def create_app():
                 Setting.get('club_icon_type', 'bundled') == 'bundled',
             'today':          date.today(),
             'active_page':    page,
+            'voucher_label':  _voucher_label(),
+            'voucher_label_plural': _voucher_label_plural(),
             'testing_mode':   Setting.get('testing_mode', '0') == '1',
             'groups_enabled': Setting.get('groups_enabled', '1') == '1',
             'email_sending_enabled': Setting.get('email_sending_enabled', '0') == '1',
@@ -969,7 +977,7 @@ def create_app():
                 if category not in ('Junior', 'Senior'):
                     category = 'Junior'
 
-                notes = 'Sports Voucher' if cell(row, 'sv').lower() in ('y', 'yes', '1', 'true') else None
+                notes = _voucher_label() if cell(row, 'sv').lower() in ('y', 'yes', '1', 'true') else None
 
                 db.session.add(Player(
                     name=name,
@@ -1345,8 +1353,8 @@ def create_app():
                     voucher = v
                     break
             if not voucher:
-                return None, ('No Sports Voucher on file with sessions remaining for this child. '
-                              'Register one on the Vouchers page.')
+                return None, (f'No {_voucher_label()} on file with sessions remaining '
+                              'for this child. Register one on the Vouchers page.')
 
         already_this_voucher = rec is not None and rec.voucher_id == voucher.id
         effective_remaining = voucher.sessions_remaining + (1 if already_this_voucher else 0)
@@ -1808,7 +1816,7 @@ def create_app():
         club_name = Setting.get('club_name', 'Club Training')
         elements = [
             Paragraph(club_name, styles['Title']),
-            Paragraph('Sports Voucher Usage Record', styles['Heading2']),
+            Paragraph(f'{_voucher_label()} Usage Record', styles['Heading2']),
             Spacer(1, 8 * mm),
         ]
 
@@ -2608,6 +2616,8 @@ def create_app():
             if new_token:
                 Setting.set('square_access_token', new_token)
         elif section == 'vouchers':
+            Setting.set('voucher_scheme_name',
+                        request.form.get('voucher_scheme_name', '').strip()[:40])
             for key, default in (('voucher_amount', '100'),
                                  ('voucher_sessions', '10'),
                                  ('voucher_max_active', '2'),
@@ -3712,13 +3722,14 @@ def _report_month_data(year, month):
 
 def _report_text(data, club):
     """Plain-text version of the report (the HTML is the readable one)."""
+    lab = lambda pt: _voucher_label() if pt == 'Sports Voucher' else pt
     lines = [f'{club} — {data["title"]}', '']
     if data['scope'] == 'day':
         for s in data['sessions']:
             lines.append(f'{s["name"]} ({s["time"]}) — {s["players"]} player(s), '
                          f'{"closed" if s["status"] == "closed" else "still open"}')
             for pt, cnt in s['breakdown']:
-                lines.append(f'  {pt}: {cnt}')
+                lines.append(f'  {lab(pt)}: {cnt}')
             lines.append(f'  Cash ${s["cash"]:.0f} · Card ${s["card"]:.0f}')
             if s['coaches']:
                 lines.append('  Coaches: ' + ', '.join(s['coaches']))
@@ -3736,7 +3747,7 @@ def _report_text(data, club):
                      f'{data["unique_players"]} different player(s)')
         lines.append(f'Cash ${data["total_cash"]:.0f} · Card ${data["total_card"]:.0f}')
         for pt, cnt in data['type_counts']:
-            lines.append(f'  {pt}: {cnt}')
+            lines.append(f'  {lab(pt)}: {cnt}')
         if data['coach_counts']:
             lines.append('Coaches: ' + ', '.join(f'{n} ({c})' for n, c in data['coach_counts']))
         if data['new_count']:
@@ -3745,6 +3756,19 @@ def _report_text(data, club):
             lines.append('Left injured: ' + ', '.join(
                 f'{n} ({d.strftime("%d %b")})' for d, n in data['injured']))
     return '\n'.join(lines)
+
+
+def _voucher_label():
+    """What this club calls its voucher scheme on screen — SA 'Sports
+    Voucher' by default; NSW 'Active Kids', QLD 'FairPlay', WA 'KidSport'…
+    The STORED payment_type stays 'Sports Voucher' everywhere (records,
+    comparisons, JS keys) — only what's displayed changes."""
+    return (Setting.get('voucher_scheme_name', '') or '').strip() or 'Sports Voucher'
+
+
+def _voucher_label_plural():
+    label = _voucher_label()
+    return label if label.lower().endswith('s') else label + 's'
 
 
 def _voucher_defaults():
@@ -3756,6 +3780,7 @@ def _voucher_defaults():
         except ValueError:
             return fallback
     return {
+        'scheme_name':  (Setting.get('voucher_scheme_name', '') or '').strip(),
         'amount':       _int_setting('voucher_amount', DEFAULT_VOUCHER_AMOUNT),
         'sessions':     _int_setting('voucher_sessions', DEFAULT_VOUCHER_SESSIONS),
         'max_active':   _int_setting('voucher_max_active', 2),

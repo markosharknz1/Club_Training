@@ -120,7 +120,7 @@
             <div class="d-flex gap-1 flex-wrap">
               {% for pt, cnt in sd.payment_summary.items() %}
               <span class="badge bg-{{ PAYMENT_COLORS.get(pt,'secondary') }}" style="font-size:.65rem">
-                {{ cnt }} {{ pt }}
+                {{ cnt }} {{ pt | pay_label }}
               </span>
               {% endfor %}
             </div>

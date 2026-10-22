@@ -1,5 +1,14 @@
 # Club Training v1.12.0
 
+## Call the voucher scheme whatever your region does
+
+Clubs outside South Australia run the same idea under different names — NSW
+*Active Kids*, Queensland *FairPlay*, WA *KidSport*… Setup → Club Settings →
+Vouchers now has a **Scheme name** field: type yours once and it appears on
+the check-in buttons, badges, the Vouchers page, PDFs and emailed reports.
+The voucher value, sessions and per-child limits were already configurable
+there. Existing records never change; leave it blank for Sports Voucher.
+
 ## Vouchers pick themselves
 
 Opening check-in for a child who has a Sports Voucher with sessions left now

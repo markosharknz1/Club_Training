@@ -5,12 +5,22 @@
   <div class="card-header fw-semibold">Voucher Rules</div>
   <div class="card-body">
     <p class="text-muted small mb-3">
-      Defaults for new vouchers and the limits enforced when registering one. The defaults
-      match the SA Sports Voucher program ($100, 10 sessions, 2 per child per calendar year).
-      Changing these never touches vouchers already registered.
+      What your region's scheme is called, defaults for new vouchers, and the limits
+      enforced when registering one. The defaults match the SA Sports Voucher program
+      ($100, 10 sessions, 2 per child per calendar year) — other regions run the same
+      idea under their own name and amounts (NSW Active Kids, QLD FairPlay Voucher,
+      WA KidSport…). Changing these never touches vouchers already registered.
     </p>
     <form method="post" action="/settings/vouchers">
       <div class="row g-3 mb-3">
+        <div class="col-12">
+          <label class="form-label fw-semibold">Scheme name</label>
+          <input type="text" name="voucher_scheme_name" class="form-control" maxlength="40"
+                 value="{{ vd.scheme_name }}" placeholder="Sports Voucher">
+          <div class="form-text">Shown on the check-in buttons, badges, the Vouchers page,
+            PDFs and reports — e.g. <em>Active Kids</em> or <em>FairPlay Voucher</em>.
+            Leave blank for Sports Voucher. Records themselves don't change.</div>
+        </div>
         <div class="col-6">
           <label class="form-label fw-semibold">Voucher value ($)</label>
           <input type="number" name="voucher_amount" class="form-control" min="1" step="1"

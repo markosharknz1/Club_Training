@@ -71,7 +71,7 @@
             {% set cnt = sd.payment_summary.get(pt, 0) %}
             {% if cnt %}
             <tr>
-              <td><span class="badge bg-{{ PAYMENT_COLORS.get(pt,'secondary') }}">{{ pt }}</span></td>
+              <td><span class="badge bg-{{ PAYMENT_COLORS.get(pt,'secondary') }}">{{ pt | pay_label }}</span></td>
               <td class="fw-semibold">{{ cnt }}</td>
               {% if pt in ['Cash','Card'] %}
               <td class="text-end text-muted small">
@@ -166,7 +166,7 @@
           <td class="text-muted small">{{ a.group.name if a.group else '—' }}</td>
           <td>
             <span class="badge bg-{{ PAYMENT_COLORS.get(a.payment_type,'secondary') }}">
-              {{ a.payment_type }}
+              {{ a.payment_type | pay_label }}
             </span>
             {% if a.new_member %}<span class="badge bg-warning text-dark" style="font-size:.65rem">NEW</span>{% endif %}
             {% if a.left_injured %}<span class="badge bg-danger" style="font-size:.65rem">left injured</span>{% endif %}
@@ -207,7 +207,7 @@
           <div class="d-flex flex-wrap gap-2" id="pe-btns">
             {% for pt in PAYMENT_TYPES %}
             <button type="button" class="btn btn-outline-secondary pay-btn"
-                    data-type="{{ pt }}" onclick="peSelect('{{ pt }}')">{{ pt }}</button>
+                    data-type="{{ pt }}" onclick="peSelect('{{ pt }}')">{{ pt | pay_label }}</button>
             {% endfor %}
           </div>
           <div id="pe-voucher-info" class="small mt-2 d-none"></div>
@@ -243,6 +243,7 @@
 {% block scripts %}
 <script>
 const PE_AMOUNT_TYPES = new Set({{ AMOUNT_TYPES | tojson }});
+const VOUCHER_LABEL = {{ voucher_label | tojson }};   // display name for 'Sports Voucher'
 const PE_PRICES = { 'Cash': {{ sd.template.price_cash|float }}, 'Card': {{ sd.template.price_card|float }} };
 let peAttId = null, peType = null, peOriginalType = null, peOriginalAmount = 0;
 let peVoucher = { playerId: null, pending: false, loaded: false, totalLeft: 0, pickLabel: '' };
@@ -297,7 +298,7 @@ function peSelect(type, amount) {
 function loadPeVouchers(playerId) {
   peVoucher = { playerId, pending: true, loaded: false, totalLeft: 0, pickLabel: '' };
   const btn = document.querySelector('#pe-btns .pay-btn[data-type="Sports Voucher"]');
-  if (btn) btn.textContent = 'Sports Voucher';
+  if (btn) btn.textContent = VOUCHER_LABEL;
   renderPeVoucherInfo();
   fetch('/api/player/' + playerId + '/vouchers')
     .then(r => r.json())
@@ -311,7 +312,7 @@ function loadPeVouchers(playerId) {
       }
       peVoucher = { playerId, pending: false, loaded: true,
                     totalLeft: total, pickLabel: pick ? pick.label : '' };
-      if (btn) btn.textContent = `Sports Voucher (${total} left)`;
+      if (btn) btn.textContent = `${VOUCHER_LABEL} (${total} left)`;
       renderPeVoucherInfo();
     })
     .catch(() => { peVoucher.pending = false; renderPeVoucherInfo(); });
