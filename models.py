@@ -342,3 +342,30 @@ class Attendance(db.Model):
     voucher = db.relationship('Voucher', backref='attendance_records')
 
     __table_args__ = (db.UniqueConstraint('session_date_id', 'player_id'),)
+
+
+class ClubDocument(db.Model):
+    """A club document (welcome pack, fee sheet, code of conduct…) kept IN
+    the database so the daily backups carry it; a plain-file copy is also
+    written to the club folder and the user's Documents (OneDrive-synced)
+    on upload. Attachable to any email from the Email page."""
+    __tablename__ = 'club_documents'
+    id          = db.Column(db.Integer, primary_key=True)
+    name        = db.Column(db.String(120), nullable=False)   # display name
+    filename    = db.Column(db.String(200), nullable=False)   # original file name
+    mime        = db.Column(db.String(100), nullable=False, default='application/pdf')
+    size        = db.Column(db.Integer, nullable=False, default=0)
+    data        = db.Column(db.LargeBinary, nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class EmailTemplate(db.Model):
+    """A saved, reusable email (e.g. the welcome email for new/prospective
+    members): subject + rich body + which club documents to attach."""
+    __tablename__ = 'email_templates'
+    id           = db.Column(db.Integer, primary_key=True)
+    name         = db.Column(db.String(120), nullable=False)
+    subject      = db.Column(db.String(200), nullable=False, default='')
+    body_html    = db.Column(db.Text, nullable=False, default='')
+    document_ids = db.Column(db.Text, nullable=False, default='[]')   # JSON list of ClubDocument ids
+    updated_at   = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

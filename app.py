@@ -16,7 +16,7 @@ from flask import (Flask, abort, jsonify, flash, redirect, render_template,
 import config
 from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     sibling_links, SessionDate, Attendance, Voucher,
-                    CoachAttendance, VoucherUse,
+                    CoachAttendance, VoucherUse, ClubDocument, EmailTemplate,
                     PAYMENT_TYPES, AMOUNT_TYPES, DAY_NAMES, PAYMENT_COLORS,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
@@ -84,6 +84,31 @@ def _backup_dirs():
     backup of it at the same time."""
     return [os.path.join(config.BASE_DIR, 'backups'),
             os.path.join(_documents_dir(), 'Club_Training Backups')]
+
+
+def _document_dirs():
+    """Where plain-file copies of uploaded club documents go: the club
+    folder, and the user's Documents folder (OneDrive-synced on most
+    machines) — same two-place idea as the database backups. The database
+    copy stays the source of truth."""
+    return [os.path.join(config.BASE_DIR, 'documents'),
+            os.path.join(_documents_dir(), 'Club_Training Documents')]
+
+
+def _export_document_copies(filename, blob):
+    """Best-effort plain-file copies of an uploaded document. Returns a
+    human description of where copies landed."""
+    landed = []
+    for d, label in zip(_document_dirs(),
+                        ('the club folder', 'Documents (OneDrive)')):
+        try:
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, filename), 'wb') as f:
+                f.write(blob)
+            landed.append(label)
+        except OSError:
+            continue   # one location failing must never block the upload
+    return ' and '.join(landed)
 
 
 def _backup_database(keep=30):
@@ -2804,7 +2829,95 @@ def create_app():
                                email_map=email_map, missing=missing,
                                providers=_configured_providers(),
                                default_provider=_default_provider(),
+                               documents=ClubDocument.query.order_by(ClubDocument.name).all(),
+                               email_templates=EmailTemplate.query.order_by(EmailTemplate.name).all(),
                                email_configured=_email_configured())
+
+    # ── Club documents (welcome packs, fee sheets…) ───────────────────
+
+    @app.route('/email/documents', methods=['POST'])
+    def email_document_upload():
+        f = request.files.get('document')
+        if not f or not f.filename:
+            flash('Choose a PDF to upload.', 'warning')
+            return redirect(url_for('email_players'))
+        blob = f.read()
+        if not blob.startswith(b'%PDF'):
+            flash('That file is not a PDF — only PDF documents are stored here.', 'danger')
+            return redirect(url_for('email_players'))
+        if len(blob) > 10 * 1024 * 1024:
+            flash('That PDF is over 10 MB — email providers reject attachments '
+                  'that big, so it can\'t be stored here.', 'danger')
+            return redirect(url_for('email_players'))
+        filename = os.path.basename(f.filename)
+        name = (request.form.get('name', '').strip()
+                or os.path.splitext(filename)[0])[:120]
+        db.session.add(ClubDocument(name=name, filename=filename,
+                                    mime='application/pdf',
+                                    size=len(blob), data=blob))
+        db.session.commit()
+        landed = _export_document_copies(filename, blob)
+        flash(f'"{name}" stored in the club database'
+              + (f', with file copies in {landed}.' if landed else '.'), 'success')
+        return redirect(url_for('email_players'))
+
+    @app.route('/email/documents/<int:doc_id>/download')
+    def email_document_download(doc_id):
+        import io
+        from flask import send_file
+        doc = ClubDocument.query.get_or_404(doc_id)
+        return send_file(io.BytesIO(doc.data), mimetype=doc.mime,
+                         as_attachment=True, download_name=doc.filename)
+
+    @app.route('/email/documents/<int:doc_id>/delete', methods=['POST'])
+    def email_document_delete(doc_id):
+        doc = ClubDocument.query.get_or_404(doc_id)
+        db.session.delete(doc)
+        db.session.commit()
+        flash(f'"{doc.name}" removed from the library. File copies in the club '
+              'folder and Documents are kept — delete those by hand if needed.',
+              'success')
+        return redirect(url_for('email_players'))
+
+    # ── Saved emails (e.g. the welcome email for new members) ─────────
+
+    @app.route('/email/templates/save', methods=['POST'])
+    def email_template_save():
+        name = request.form.get('name', '').strip()[:120]
+        if not name:
+            flash('Give the saved email a name (e.g. "Welcome — new members").', 'warning')
+            return redirect(url_for('email_players'))
+        doc_ids = [int(d) for d in request.form.getlist('doc_ids') if d.isdigit()]
+        tpl = (db.session.get(EmailTemplate, int(request.form['template_id']))
+               if request.form.get('template_id', '').isdigit() else None)
+        if tpl is None:
+            tpl = EmailTemplate.query.filter(
+                db.func.lower(EmailTemplate.name) == name.lower()).first()
+        if tpl is None:
+            tpl = EmailTemplate(name=name)
+            db.session.add(tpl)
+        tpl.name = name
+        tpl.subject = request.form.get('subject', '').strip()[:200]
+        tpl.body_html = request.form.get('body_html', '')
+        tpl.document_ids = json.dumps(doc_ids)
+        db.session.commit()
+        flash(f'Saved "{name}" — load it from the Saved emails list any time.', 'success')
+        return redirect(url_for('email_players'))
+
+    @app.route('/api/email/templates/<int:tpl_id>')
+    def api_email_template(tpl_id):
+        tpl = EmailTemplate.query.get_or_404(tpl_id)
+        return jsonify(ok=True, name=tpl.name, subject=tpl.subject,
+                       body_html=tpl.body_html,
+                       doc_ids=json.loads(tpl.document_ids or '[]'))
+
+    @app.route('/email/templates/<int:tpl_id>/delete', methods=['POST'])
+    def email_template_delete(tpl_id):
+        tpl = EmailTemplate.query.get_or_404(tpl_id)
+        db.session.delete(tpl)
+        db.session.commit()
+        flash(f'Deleted the saved email "{tpl.name}".', 'success')
+        return redirect(url_for('email_players'))
 
     @app.route('/email/send', methods=['POST'])
     def email_players_send():
@@ -2844,6 +2957,18 @@ def create_app():
                 return redirect(url_for('email_players', months=months, session_id=session_id))
             attachments.append((os.path.basename(f.filename), blob,
                                 f.mimetype or 'application/octet-stream'))
+
+        # Stored club documents ticked in the composer share the same cap
+        for did in request.form.getlist('doc_ids'):
+            doc = db.session.get(ClubDocument, int(did)) if did.isdigit() else None
+            if not doc:
+                continue
+            total += doc.size
+            if total > 10 * 1024 * 1024:
+                flash('Attachments are over 10 MB in total — email providers '
+                      'reject messages that big. Untick a document or remove a file.', 'danger')
+                return redirect(url_for('email_players', months=months, session_id=session_id))
+            attachments.append((doc.filename, doc.data, doc.mime))
 
         # Recipients: only the TICKED player addresses, plus any typed-in
         # extras, plus an optional single "copy to" (BCC-style — one copy,

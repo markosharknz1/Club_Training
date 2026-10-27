@@ -97,6 +97,20 @@
     <div class="card shadow-sm border-0">
       <div class="card-header fw-semibold">Message</div>
       <div class="card-body">
+        {% if email_templates %}
+        <div class="d-flex gap-2 align-items-center mb-3">
+          <select id="tpl-select" class="form-select form-select-sm">
+            <option value="">— Saved emails —</option>
+            {% for t in email_templates %}
+            <option value="{{ t.id }}">{{ t.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="btn btn-outline-primary btn-sm text-nowrap"
+                  onclick="loadTemplate()">Load</button>
+          <button type="button" class="btn btn-outline-danger btn-sm text-nowrap"
+                  onclick="deleteTemplate()">Delete</button>
+        </div>
+        {% endif %}
         <form method="post" action="/email/send" enctype="multipart/form-data" id="composeForm"
               onsubmit="return prepareSend()">
           <input type="hidden" name="months" value="{{ months }}">
@@ -131,6 +145,18 @@
             <div class="form-text">PDFs, images, any file — up to 10 MB in total.
               Every recipient gets the same attachments.</div>
             <div class="text-danger small d-none" id="att-error"></div>
+            {% if documents %}
+            <div class="small fw-semibold mt-2 mb-1">Attach club documents</div>
+            {% for d in documents %}
+            <div class="form-check">
+              <input class="form-check-input doc-box" type="checkbox" name="doc_ids"
+                     value="{{ d.id }}" id="doc-{{ d.id }}" form="composeForm">
+              <label class="form-check-label small" for="doc-{{ d.id }}">
+                {{ d.name }} <span class="text-muted">({{ (d.size / 1024) | round | int }} KB)</span>
+              </label>
+            </div>
+            {% endfor %}
+            {% endif %}
           </div>
 
           <div class="mb-3">
@@ -167,8 +193,77 @@
             via <span id="send-provider"></span>
           </button>
         </form>
+
+        {# Save the composed message for reuse (e.g. the welcome email) #}
+        <form method="post" action="/email/templates/save" id="tplForm"
+              class="d-flex gap-2 align-items-center border-top pt-3 mt-3"
+              onsubmit="return prepareTemplateSave()">
+          <input type="hidden" name="subject" id="tpl-subject">
+          <input type="hidden" name="body_html" id="tpl-body">
+          <input type="hidden" name="template_id" id="tpl-id">
+          <input type="text" name="name" id="tpl-name" class="form-control form-control-sm"
+                 placeholder="e.g. Welcome — new members" autocomplete="off">
+          <button type="submit" class="btn btn-outline-success btn-sm text-nowrap">💾 Save as reusable email</button>
+        </form>
+        <div class="form-text">Saves the subject, message and ticked club documents under that
+          name, so the welcome email for new or prospective members is one click away.</div>
       </div>
     </div>
+  </div>
+</div>
+
+{# ── Club documents ─────────────────────────────────────────────────── #}
+<div class="card shadow-sm border-0 mb-4" style="max-width:720px">
+  <div class="card-header fw-semibold">Club documents</div>
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      PDFs the club sends out — a welcome pack, fee sheet, code of conduct. Stored in the
+      club database (so the daily backups include them), with file copies saved to the
+      <code>documents</code> folder beside the app and to Documents
+      (OneDrive-synced on most machines). Tick them in the composer to attach.
+    </p>
+    <form method="post" action="/email/documents" enctype="multipart/form-data"
+          class="row g-2 align-items-end mb-3">
+      <div class="col-sm-5">
+        <label class="form-label small fw-semibold mb-1">PDF file</label>
+        <input type="file" name="document" class="form-control form-control-sm"
+               accept="application/pdf" required>
+      </div>
+      <div class="col-sm-5">
+        <label class="form-label small fw-semibold mb-1">Name (optional)</label>
+        <input type="text" name="name" class="form-control form-control-sm"
+               placeholder="e.g. Welcome pack 2027">
+      </div>
+      <div class="col-sm-2">
+        <button class="btn btn-success btn-sm w-100">Upload</button>
+      </div>
+    </form>
+    {% if documents %}
+    <table class="table table-sm align-middle mb-0" style="font-size:.85rem">
+      <thead class="table-dark">
+        <tr><th>Name</th><th>File</th><th class="text-end">Size</th><th>Uploaded</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for d in documents %}
+        <tr>
+          <td class="fw-semibold">{{ d.name }}</td>
+          <td class="text-muted">{{ d.filename }}</td>
+          <td class="text-end">{{ (d.size / 1024) | round | int }} KB</td>
+          <td class="text-muted">{{ d.uploaded_at.strftime('%d %b %Y') }}</td>
+          <td class="text-end text-nowrap">
+            <a href="/email/documents/{{ d.id }}/download" class="btn btn-outline-secondary btn-sm py-0 px-2">↓</a>
+            <form method="post" action="/email/documents/{{ d.id }}/delete" class="d-inline"
+                  onsubmit="return confirm('Remove {{ d.name }} from the library? File copies on disk are kept.')">
+              <button class="btn btn-outline-danger btn-sm py-0 px-2">✕</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted small fst-italic mb-0">No documents stored yet.</p>
+    {% endif %}
   </div>
 </div>
 
@@ -243,6 +338,58 @@ if (allBox) allBox.addEventListener('change', function () {
   document.getElementById(id).addEventListener('input', refreshSendButton));
 document.getElementById('provider-select').addEventListener('change', refreshSendButton);
 refreshSendButton();
+
+// ── Saved emails ─────────────────────────────────────────────────────
+function loadTemplate() {
+  const sel = document.getElementById('tpl-select');
+  if (!sel || !sel.value) { alert('Pick a saved email first.'); return; }
+  fetch('/api/email/templates/' + sel.value)
+    .then(r => r.json())
+    .then(t => {
+      if (!t.ok) return;
+      document.querySelector('#composeForm input[name="subject"]').value = t.subject;
+      document.getElementById('editor').innerHTML = t.body_html;
+      document.querySelectorAll('.doc-box').forEach(b => {
+        b.checked = t.doc_ids.includes(parseInt(b.value));
+      });
+      document.getElementById('tpl-name').value = t.name;
+      document.getElementById('tpl-id').value = sel.value;
+    });
+}
+
+function deleteTemplate() {
+  const sel = document.getElementById('tpl-select');
+  if (!sel || !sel.value) { alert('Pick a saved email first.'); return; }
+  const name = sel.options[sel.selectedIndex].text;
+  if (!confirm('Delete the saved email "' + name + '"?')) return;
+  const f = document.createElement('form');
+  f.method = 'post';
+  f.action = '/email/templates/' + sel.value + '/delete';
+  document.body.appendChild(f);
+  f.submit();
+}
+
+function prepareTemplateSave() {
+  const name = document.getElementById('tpl-name').value.trim();
+  if (!name) { alert('Give the saved email a name, e.g. "Welcome — new members".'); return false; }
+  const subject = document.querySelector('#composeForm input[name="subject"]').value.trim();
+  const html = document.getElementById('editor').innerHTML;
+  if (!subject || !document.getElementById('editor').innerText.trim()) {
+    alert('Write the subject and message first — saving stores what\'s in the composer.');
+    return false;
+  }
+  document.getElementById('tpl-subject').value = subject;
+  document.getElementById('tpl-body').value = html;
+  // ticked club documents are saved with it
+  const form = document.getElementById('tplForm');
+  form.querySelectorAll('input[name="doc_ids"]').forEach(el => el.remove());
+  document.querySelectorAll('.doc-box:checked').forEach(b => {
+    const h = document.createElement('input');
+    h.type = 'hidden'; h.name = 'doc_ids'; h.value = b.value;
+    form.appendChild(h);
+  });
+  return true;
+}
 
 function prepareSend() {
   const ed = document.getElementById('editor');
