@@ -22,7 +22,7 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
 
 
 APP_VERSION = '1.13.0'
-APP_RELEASED = '23 October 2026'   # bump alongside APP_VERSION at release time
+APP_RELEASED = '28 October 2026'   # bump alongside APP_VERSION at release time
 
 # ─── Branding ───────────────────────────────────────────────────────
 # Bundled club icons (static/icons/sports/<key>.svg — see LICENSE.md there).
@@ -2462,6 +2462,51 @@ def create_app():
             total_new=data['total_new'],
         )
 
+    def _committee_range():
+        """(start, end) from the query string, defaulting to this year so
+        far. Returns (start, end, error)."""
+        try:
+            start = date.fromisoformat(request.args.get('start', '')
+                                       or date(date.today().year, 1, 1).isoformat())
+            end = date.fromisoformat(request.args.get('end', '')
+                                     or date.today().isoformat())
+        except ValueError:
+            return None, None, 'Pick valid From and To dates.'
+        if start > end:
+            return None, None, 'The From date must be before the To date.'
+        return start, end, None
+
+    @app.route('/reports/committee')
+    def reports_committee():
+        start, end, err = _committee_range()
+        if err:
+            flash(err, 'danger')
+            return redirect(url_for('reports'))
+        return render_template('reports_committee.html',
+                               **_committee_report_data(start, end))
+
+    @app.route('/reports/committee.csv')
+    def reports_committee_csv():
+        import csv, io
+        from flask import Response
+        start, end, err = _committee_range()
+        if err:
+            flash(err, 'danger')
+            return redirect(url_for('reports'))
+        data = _committee_report_data(start, end)
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow([f'Times played {start.strftime("%d/%m/%Y")} to {end.strftime("%d/%m/%Y")}'])
+        w.writerow(['Player', 'Times played in period', 'New this period',
+                    'Total sessions ever'])
+        for r in data['players']:
+            w.writerow([r['name'], r['plays'], 'Yes' if r['new'] else '',
+                        r['total_ever']])
+        return Response(
+            buf.getvalue(), mimetype='text/csv',
+            headers={'Content-Disposition':
+                     f'attachment; filename=committee_report_{start.isoformat()}_{end.isoformat()}.csv'})
+
     @app.route('/reports/export')
     def reports_export():
         import io
@@ -3842,6 +3887,60 @@ def _report_month_data(year, month):
         'coach_counts': list(coach_counts.items()),
         'new_count': new_count,
         'injured': injured,
+    }
+
+
+def _committee_report_data(start, end):
+    """Committee numbers for an explicit date range: how many new players,
+    whether they stuck around (retention), and how often each player played.
+
+    'New player' = their first-ever check-in falls inside the range (not the
+    manual NEW tick, which staff can forget). Retention counts each new
+    player's TOTAL check-ins from their first day to today — not just inside
+    the range — so a January starter still playing in June counts as kept."""
+    rows = (db.session.query(Attendance.player_id, SessionDate.date)
+            .join(SessionDate, Attendance.session_date_id == SessionDate.id)
+            .order_by(SessionDate.date).all())
+    first_ever, totals_ever, in_range = {}, {}, {}
+    sessions_in_range = set()
+    for pid, d in rows:
+        first_ever.setdefault(pid, d)
+        totals_ever[pid] = totals_ever.get(pid, 0) + 1
+        if start <= d <= end:
+            in_range[pid] = in_range.get(pid, 0) + 1
+            sessions_in_range.add(d)
+    new_pids = {pid for pid, f in first_ever.items() if start <= f <= end}
+
+    buckets = [('Came once, never returned', lambda n: n == 1),
+               ('Returned 1–2 more times (2–3 total)', lambda n: 2 <= n <= 3),
+               ('Became semi-regular (4–9 total)', lambda n: 4 <= n <= 9),
+               ('Became a regular (10+ total)', lambda n: n >= 10)]
+    retention = [(label, sum(1 for pid in new_pids if test(totals_ever[pid])))
+                 for label, test in buckets]
+    returned = sum(1 for pid in new_pids if totals_ever[pid] >= 2)
+
+    names = {p.id: p.name for p in Player.query.all()}
+    players = sorted(
+        ({'name': names.get(pid, f'(deleted player {pid})'),
+          'plays': cnt,
+          'new': pid in new_pids,
+          'total_ever': totals_ever[pid]}
+         for pid, cnt in in_range.items()),
+        key=lambda r: (-r['plays'], r['name'].lower()))
+
+    sd_count = (SessionDate.query
+                .filter(SessionDate.date >= start, SessionDate.date <= end)
+                .count())
+    return {
+        'start': start, 'end': end,
+        'sessions_run': sd_count,
+        'total_checkins': sum(in_range.values()),
+        'unique_players': len(in_range),
+        'new_players': len(new_pids),
+        'returned': returned,
+        'retention_rate': round(100 * returned / len(new_pids)) if new_pids else None,
+        'retention': retention,
+        'players': players,
     }
 
 

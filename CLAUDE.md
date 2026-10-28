@@ -835,6 +835,30 @@ own machine and demo to other club members (e.g. "Carol").
     footers/Hide button). **Test gotcha: JS template literals like `No ${VOUCHER_LABEL}...`
     appear VERBATIM in served page source — don't assert their absence.**
 
+47. **v1.13.0 (same release) — club documents + saved emails + committee report.**
+    (a) DOCUMENTS (user: "upload a PDF document, or create a generic email... saved into the
+    database, or club folder and uploaded to OneDrive as well"): new tables `club_documents`
+    (name/filename/mime/size/data BLOB — in-DB so daily backups carry them) and
+    `email_templates` (name/subject/body_html/document_ids JSON) — plain CREATEs, no ALTER
+    migration needed. Upload (PDF-only, %PDF magic sniff, ≤10MB) also writes plain-file
+    copies via `_export_document_copies` to `_document_dirs()` = app `documents\` folder +
+    `<Documents>\Club_Training Documents` (OneDrive-synced — same two-place pattern as
+    backups); library delete keeps disk copies deliberately. Composer: stored docs are
+    tickable `doc_ids` sharing the 10MB cap with uploads; saved emails load/save/delete on
+    the Email page (same name case-insensitively updates, not duplicates). Routes:
+    /email/documents[+/<id>/download|delete], /email/templates/save,
+    /api/email/templates/<id>, /email/templates/<id>/delete. 19-check suite
+    (test_documents.py) — **tests MUST monkeypatch app._document_dirs to scratch or uploads
+    land in the real Documents/OneDrive folder.**
+    (b) COMMITTEE REPORT (user: date-range new-player count, retention buckets, per-player
+    play counts, CSV): `_committee_report_data(start, end)` — 'new player' = FIRST-EVER
+    check-in in range (not the manual NEW tick); retention counts each new player's total
+    check-ins from first day to TODAY (not just in range); buckets once/2–3/4–9/10+ plus
+    "came back at least once" %. Routes /reports/committee (+.csv) with
+    `_committee_range()` (defaults Jan 1 → today, validates order); card on /reports.
+    Per-player table sorted plays desc, counts only (user: no dates needed). 15-check suite
+    (test_committee.py) incl. endpoint-inclusive range and first-after-range exclusion.
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

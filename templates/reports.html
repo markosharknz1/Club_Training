@@ -8,6 +8,30 @@
      class="btn btn-outline-secondary btn-sm">↓ Download Excel</a>
 </div>
 
+{# Committee report over an explicit date range #}
+<div class="card shadow-sm border-0 mb-4" style="max-width:720px">
+  <div class="card-header fw-semibold">Committee report</div>
+  <div class="card-body py-3">
+    <form method="get" action="/reports/committee" class="row g-2 align-items-end">
+      <div class="col-auto">
+        <label class="form-label small fw-semibold mb-1">From</label>
+        <input type="date" name="start" class="form-control form-control-sm"
+               value="{{ today.replace(month=1, day=1).isoformat() }}">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small fw-semibold mb-1">To</label>
+        <input type="date" name="end" class="form-control form-control-sm"
+               value="{{ today.isoformat() }}">
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-primary btn-sm">View report</button>
+      </div>
+      <div class="form-text mt-1 mb-0">New players in the period, whether they kept coming
+        back (retention), and how many times each player played — with a CSV download.</div>
+    </form>
+  </div>
+</div>
+
 {# Filter bar #}
 <form method="get" action="/reports" class="row g-2 align-items-end mb-4">
   <div class="col-auto">
