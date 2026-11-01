@@ -24,10 +24,19 @@
                value="{{ today.isoformat() }}">
       </div>
       <div class="col-auto">
+        <label class="form-label small fw-semibold mb-1">Session</label>
+        <select name="session_id" class="form-select form-select-sm">
+          <option value="">All sessions</option>
+          {% for s in all_sessions %}
+          <option value="{{ s.id }}">{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
         <button class="btn btn-primary btn-sm">View report</button>
       </div>
-      <div class="form-text mt-1 mb-0">New players in the period, whether they kept coming
-        back (retention), and how many times each player played — with a CSV download.</div>
+      <div class="form-text mt-1 mb-0">New players, retention and per-player play counts,
+        broken down per session — with a CSV download.</div>
     </form>
   </div>
 </div>

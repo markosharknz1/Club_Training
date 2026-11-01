@@ -2482,8 +2482,12 @@ def create_app():
         if err:
             flash(err, 'danger')
             return redirect(url_for('reports'))
+        session_id = request.args.get('session_id', type=int)
+        all_sessions = SessionTemplate.query.order_by(
+            SessionTemplate.day_of_week, SessionTemplate.start_time).all()
         return render_template('reports_committee.html',
-                               **_committee_report_data(start, end))
+                               all_sessions=all_sessions,
+                               **_committee_report_data(start, end, session_id))
 
     @app.route('/reports/committee.csv')
     def reports_committee_csv():
@@ -2493,15 +2497,28 @@ def create_app():
         if err:
             flash(err, 'danger')
             return redirect(url_for('reports'))
-        data = _committee_report_data(start, end)
+        session_id = request.args.get('session_id', type=int)
+        data = _committee_report_data(start, end, session_id)
         buf = io.StringIO()
         w = csv.writer(buf)
         w.writerow([f'Times played {start.strftime("%d/%m/%Y")} to {end.strftime("%d/%m/%Y")}'])
-        w.writerow(['Player', 'Times played in period', 'New this period',
-                    'Total sessions ever'])
+        # one column per session the report covers, so the committee sees
+        # each night separately — plus the period total
+        tpl_cols = [(t['id'], t['name']) for t in data['per_session']]
+        w.writerow(['Player'] + [n for _, n in tpl_cols]
+                   + ['Total in period', 'New this period', 'Total sessions ever'])
         for r in data['players']:
-            w.writerow([r['name'], r['plays'], 'Yes' if r['new'] else '',
-                        r['total_ever']])
+            w.writerow([r['name']]
+                       + [r['per_template'].get(tid, 0) for tid, _ in tpl_cols]
+                       + [r['plays'], 'Yes' if r['new'] else '', r['total_ever']])
+        if data['per_session']:
+            w.writerow([])
+            w.writerow(['Session', 'Times run', 'Check-ins', 'Avg per run',
+                        'Different players', 'New players', 'Came back', 'Retention %'])
+            for t in data['per_session']:
+                w.writerow([t['name'], t['occurrences'], t['checkins'], t['avg'],
+                            t['uniques'], t['new'], t['returned'],
+                            t['retention_rate'] if t['retention_rate'] is not None else ''])
         return Response(
             buf.getvalue(), mimetype='text/csv',
             headers={'Content-Disposition':
@@ -3890,26 +3907,32 @@ def _report_month_data(year, month):
     }
 
 
-def _committee_report_data(start, end):
-    """Committee numbers for an explicit date range: how many new players,
-    whether they stuck around (retention), and how often each player played.
+def _committee_report_data(start, end, session_id=None):
+    """Committee numbers for an explicit date range, broken down PER SESSION
+    (per-session stats differ wildly), optionally filtered to one session.
 
-    'New player' = their first-ever check-in falls inside the range (not the
-    manual NEW tick, which staff can forget). Retention counts each new
-    player's TOTAL check-ins from their first day to today — not just inside
-    the range — so a January starter still playing in June counts as kept."""
-    rows = (db.session.query(Attendance.player_id, SessionDate.date)
+    'New player' = their first-ever club check-in — at any session — falls
+    inside the range (not the manual NEW tick, which staff can forget); a
+    new player belongs to the session their first visit was at. Retention
+    counts each new player's TOTAL check-ins anywhere from their first day
+    to today — not just inside the range — so a January starter still
+    playing in June counts as kept."""
+    rows = (db.session.query(Attendance.player_id, SessionDate.date,
+                             SessionDate.session_id)
             .join(SessionDate, Attendance.session_date_id == SessionDate.id)
             .order_by(SessionDate.date).all())
-    first_ever, totals_ever, in_range = {}, {}, {}
-    sessions_in_range = set()
-    for pid, d in rows:
-        first_ever.setdefault(pid, d)
+    first_ever, totals_ever = {}, {}          # club-wide, never filtered
+    in_range, per_tpl_player = {}, {}         # filtered by session_id if set
+    for pid, d, tid in rows:
+        first_ever.setdefault(pid, (d, tid))
         totals_ever[pid] = totals_ever.get(pid, 0) + 1
-        if start <= d <= end:
+        if start <= d <= end and (session_id is None or tid == session_id):
             in_range[pid] = in_range.get(pid, 0) + 1
-            sessions_in_range.add(d)
-    new_pids = {pid for pid, f in first_ever.items() if start <= f <= end}
+            per_tpl_player.setdefault(pid, {})
+            per_tpl_player[pid][tid] = per_tpl_player[pid].get(tid, 0) + 1
+    new_pids = {pid for pid, (f, ftid) in first_ever.items()
+                if start <= f <= end
+                and (session_id is None or ftid == session_id)}
 
     buckets = [('Came once, never returned', lambda n: n == 1),
                ('Returned 1–2 more times (2–3 total)', lambda n: 2 <= n <= 3),
@@ -3923,17 +3946,46 @@ def _committee_report_data(start, end):
     players = sorted(
         ({'name': names.get(pid, f'(deleted player {pid})'),
           'plays': cnt,
+          'per_template': per_tpl_player.get(pid, {}),
           'new': pid in new_pids,
           'total_ever': totals_ever[pid]}
          for pid, cnt in in_range.items()),
         key=lambda r: (-r['plays'], r['name'].lower()))
 
-    sd_count = (SessionDate.query
-                .filter(SessionDate.date >= start, SessionDate.date <= end)
-                .count())
+    # One row per session template: this is where the committee sees that
+    # Monday Juniors and Wednesday Seniors behave like different clubs.
+    sd_q = SessionDate.query.filter(SessionDate.date >= start,
+                                    SessionDate.date <= end)
+    if session_id is not None:
+        sd_q = sd_q.filter(SessionDate.session_id == session_id)
+    occurrences = {}
+    for sd in sd_q.all():
+        occurrences[sd.session_id] = occurrences.get(sd.session_id, 0) + 1
+    tpl_rows = []
+    for tpl in SessionTemplate.query.order_by(SessionTemplate.day_of_week,
+                                              SessionTemplate.start_time).all():
+        if session_id is not None and tpl.id != session_id:
+            continue
+        occ = occurrences.get(tpl.id, 0)
+        checkins = sum(p['per_template'].get(tpl.id, 0) for p in players)
+        uniques = sum(1 for p in players if p['per_template'].get(tpl.id, 0))
+        tpl_new = {pid for pid in new_pids if first_ever[pid][1] == tpl.id}
+        tpl_ret = sum(1 for pid in tpl_new if totals_ever[pid] >= 2)
+        if not occ and not checkins:
+            continue
+        tpl_rows.append({
+            'id': tpl.id, 'name': tpl.name,
+            'occurrences': occ, 'checkins': checkins,
+            'avg': round(checkins / occ, 1) if occ else 0,
+            'uniques': uniques,
+            'new': len(tpl_new), 'returned': tpl_ret,
+            'retention_rate': round(100 * tpl_ret / len(tpl_new)) if tpl_new else None,
+        })
+
     return {
         'start': start, 'end': end,
-        'sessions_run': sd_count,
+        'session_id': session_id,
+        'sessions_run': sum(occurrences.values()),
         'total_checkins': sum(in_range.values()),
         'unique_players': len(in_range),
         'new_players': len(new_pids),
@@ -3941,6 +3993,7 @@ def _committee_report_data(start, end):
         'retention_rate': round(100 * returned / len(new_pids)) if new_pids else None,
         'retention': retention,
         'players': players,
+        'per_session': tpl_rows,
     }
 
 

@@ -859,6 +859,21 @@ own machine and demo to other club members (e.g. "Carol").
     Per-player table sorted plays desc, counts only (user: no dates needed). 15-check suite
     (test_committee.py) incl. endpoint-inclusive range and first-after-range exclusion.
 
+48. **Committee report broken down per session** (user: "need to show numbers per session,
+    not per day, as the per-session stats change wildly"). `_committee_report_data` gained
+    `session_id=None`: rows query now carries SessionDate.session_id; `first_ever` stores
+    (date, template_id) so a NEW player BELONGS to the session their first-ever club visit
+    was at; totals_ever/first_ever stay CLUB-WIDE (unfiltered) while in-range counts and
+    new_pids filter by session when one is picked. New `per_session` rows (one per template
+    with activity: occurrences/checkins/avg/uniques/new/returned/retention%) + per-player
+    `per_template` count dicts. Committee page gained its own From/To/Session filter bar,
+    a Per-session table with "Only this" drill-down links, and the CSV now has one column
+    per session plus a per-session summary block appended; /reports card gained the session
+    picker. Suite rewritten with TWO templates (13 checks, test_committee.py) — **test
+    gotcha: the filter dropdown lists every session, so "filtered page excludes other
+    sessions" must assert on the table's `<td class="fw-semibold">` cells, not the bare
+    name.** Live-verified on seeded preview.
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually
