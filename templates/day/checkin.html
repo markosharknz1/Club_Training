@@ -280,6 +280,16 @@
           <div id="voucher-empty" class="alert alert-danger small d-none mb-2">
             No voucher on file for this child.
           </div>
+          <div class="row g-2 mb-2">
+            <div class="col-5">
+              <input type="text" id="nv-who" class="form-control form-control-sm"
+                     placeholder="Added by (your name)" maxlength="80" autocomplete="off">
+            </div>
+            <div class="col-7">
+              <input type="text" id="nv-why" class="form-control form-control-sm"
+                     placeholder="Why (e.g. paper voucher at the desk)" maxlength="200" autocomplete="off">
+            </div>
+          </div>
           <button type="button" class="btn btn-outline-success btn-sm" onclick="createVoucherForPlayer()">
             + New {{ voucher_label }} ({{ DEFAULT_VOUCHER_AMOUNT | int }} / {{ DEFAULT_VOUCHER_SESSIONS }} sessions)
           </button>
@@ -626,16 +636,28 @@ function promptCreateVoucher(reason) {
 
 function createVoucherForPlayer() {
   if (!currentPlayerId) return;
+  const who = document.getElementById('nv-who');
+  const why = document.getElementById('nv-why');
+  if (!who.value.trim() && localStorage) {
+    try { who.value = localStorage.getItem('ct-added-by') || ''; } catch (e) {}
+  }
+  if (!who.value.trim() || !why.value.trim()) {
+    showError('Fill in who is adding this voucher and why — every voucher records that.');
+    (who.value.trim() ? why : who).focus();
+    return;
+  }
+  try { localStorage.setItem('ct-added-by', who.value.trim()); } catch (e) {}
   fetch(`/api/player/${currentPlayerId}/vouchers`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({}),
+    body: JSON.stringify({added_by: who.value.trim(), added_reason: why.value.trim()}),
   }).then(r => r.json()).then(data => {
     if (!data.ok) {
       showError(data.error);
       return;
     }
     voucherPromptShown = false;
+    why.value = '';
     loadVoucherOptions(currentPlayerId, data.voucher.id);
   });
 }

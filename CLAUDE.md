@@ -874,6 +874,24 @@ own machine and demo to other club members (e.g. "Carol").
     sessions" must assert on the table's `<td class="fw-semibold">` cells, not the bare
     name.** Live-verified on seeded preview.
 
+49. **Voucher audit trail (who/why, required) + export-all CSV** (user: "there needs to be a
+    confirmation field as to why it was added, and by who"; "an export of all the sports
+    vouchers"). Voucher gained `added_by` VARCHAR(80) + `added_reason` VARCHAR(200)
+    (nullable — pre-audit vouchers show "—"; ALTER migration in the vouchers PRAGMA block).
+    REQUIRED on all three creation paths: /vouchers action=add (modal gained Added by/Why
+    fields), /api/player/<id>/vouchers (day-modal quick-create gained #nv-who/#nv-why
+    inputs; empty → showError+focus, never creates), /vouchers/import (required
+    `imported_by` field; reason auto = "CSV import (<filename>)"; re-import's recreated
+    holder vouchers get it too). The desk name is remembered in localStorage key
+    `ct-added-by` across both UIs. Shown: vouchers table "Added by" column (reason as small
+    text), edit-dialog read-only line (via _voucher_json added_by/added_reason — NOTE
+    /api/voucher/<id> wraps as `{ok, voucher:{...}}`), voucher PDF "Registered by" row.
+    NEW `/vouchers/export.csv`: EVERY voucher incl. hidden — player/number/dates/amount/
+    sessions/hidden/continues-from/added_by/reason/notes, filename from
+    _voucher_label_plural. 18-check suite (test_voucher_audit.py) — **fixture gotcha: the
+    max-active-vouchers limit (default 2) applies to import rows too; don't import for a
+    player the test already gave 2 active vouchers.** Live-verified on seeded preview.
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

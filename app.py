@@ -309,6 +309,10 @@ def create_app():
             db.session.execute(db.text(
                 "ALTER TABLE vouchers ADD COLUMN continues_from_id INTEGER REFERENCES vouchers(id)"))
             db.session.commit()
+        if voucher_cols and 'added_by' not in voucher_cols:
+            db.session.execute(db.text("ALTER TABLE vouchers ADD COLUMN added_by VARCHAR(80)"))
+            db.session.execute(db.text("ALTER TABLE vouchers ADD COLUMN added_reason VARCHAR(200)"))
+            db.session.commit()
         if voucher_cols and 'sessions_used_before' not in voucher_cols:
             db.session.execute(db.text(
                 "ALTER TABLE vouchers ADD COLUMN sessions_used_before INTEGER NOT NULL DEFAULT 0"))
@@ -1637,7 +1641,12 @@ def create_app():
                 issued_str  = request.form.get('date_issued') or date.today().isoformat()
                 issued_date = date.fromisoformat(issued_str)
                 notes       = request.form.get('notes', '').strip() or None
+                added_by     = request.form.get('added_by', '').strip()[:80]
+                added_reason = request.form.get('added_reason', '').strip()[:200]
                 limit_error = _voucher_limit_error(player_id, issued_date)
+                if not added_by or not added_reason:
+                    limit_error = ('Say who is adding this voucher and why — '
+                                   'every voucher needs that record.')
                 if voucher_num and Voucher.query.filter(
                         db.func.lower(Voucher.voucher_number) == voucher_num.lower()).first():
                     limit_error = f'Voucher number "{voucher_num}" is already registered.'
@@ -1648,6 +1657,7 @@ def create_app():
                         player_id=player_id, voucher_number=voucher_num,
                         amount=amount, sessions_total=sessions,
                         date_issued=issued_date, notes=notes,
+                        added_by=added_by, added_reason=added_reason,
                     )
                     v.continues_from = _voucher_to_continue(player_id)
                     db.session.add(v)
@@ -1731,6 +1741,32 @@ def create_app():
                                DEFAULT_VOUCHER_AMOUNT=_voucher_defaults()['amount'],
                                DEFAULT_VOUCHER_SESSIONS=_voucher_defaults()['sessions'])
 
+    @app.route('/vouchers/export.csv')
+    def vouchers_export_csv():
+        """Every voucher ever registered — including hidden ones — with the
+        who/why audit trail, for the committee or the scheme's paperwork."""
+        import csv, io
+        from flask import Response
+        vs = (Voucher.query.join(Player, Voucher.player_id == Player.id)
+              .order_by(Player.name, Voucher.date_issued, Voucher.id).all())
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(['Player', 'Voucher #', 'Date issued', 'Amount',
+                    'Sessions total', 'Sessions used', 'Sessions remaining',
+                    'Hidden', 'Continues from', 'Added by', 'Reason added', 'Notes'])
+        for v in vs:
+            w.writerow([v.player.name, v.voucher_number or '',
+                        v.date_issued.isoformat(), int(float(v.amount or 0)),
+                        v.sessions_total, v.sessions_used, v.sessions_remaining,
+                        'Yes' if v.hidden else '',
+                        v.continues_from.label if v.continues_from else '',
+                        v.added_by or '', v.added_reason or '', v.notes or ''])
+        stem = re.sub(r'\W+', '_', _voucher_label_plural().lower())
+        return Response(
+            buf.getvalue(), mimetype='text/csv',
+            headers={'Content-Disposition':
+                     f'attachment; filename={stem}_{date.today().isoformat()}.csv'})
+
     def _voucher_to_continue(player_id):
         """The child's most recent used-up voucher that nothing follows on
         from yet — the natural 'previous voucher' for a new one."""
@@ -1768,6 +1804,7 @@ def create_app():
             'sessions_used': v.sessions_used,
             'sessions_remaining': v.sessions_remaining,
             'notes': v.notes or '', 'hidden': bool(v.hidden),
+            'added_by': v.added_by or '', 'added_reason': v.added_reason or '',
             'continues_from_id': v.continues_from_id,
             'continued_by': v.continued_by.label if v.continued_by else None,
             'other_vouchers': siblings,
@@ -1854,6 +1891,9 @@ def create_app():
             ['Sessions used:',      str(v.sessions_used)],
             ['Sessions remaining:', str(v.sessions_remaining)],
         ]
+        if v.added_by:
+            info_data.append(['Registered by:',
+                              v.added_by + (f' — {v.added_reason}' if v.added_reason else '')])
         info_table = Table(info_data, colWidths=[50 * mm, 100 * mm])
         info_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
@@ -1910,10 +1950,17 @@ def create_app():
                 flash('Choose a CSV or Excel file first.', 'danger')
                 return redirect(url_for('vouchers_import'))
 
+            imported_by = request.form.get('imported_by', '').strip()[:80]
+            if not imported_by:
+                flash('Say who is doing this import — every voucher records '
+                      'who added it and why.', 'danger')
+                return redirect(url_for('vouchers_import'))
+
             rows = _read_tabular_rows(file)
             if not rows:
                 flash('That file appears to be empty.', 'danger')
                 return redirect(url_for('vouchers_import'))
+            import_reason = f'CSV import ({os.path.basename(file.filename)})'[:200]
 
             # Optional: a fresh balance sheet supersedes earlier imported
             # balances. Only vouchers that came from an import AND have no
@@ -2067,6 +2114,7 @@ def create_app():
                     player_id=player.id, voucher_number=vnum,
                     amount=amount, sessions_total=sessions,
                     date_issued=issued, notes=notes,
+                    added_by=imported_by, added_reason=import_reason,
                 )
                 db.session.add(v_new)
                 if used_before:
@@ -2102,7 +2150,9 @@ def create_app():
                         target = Voucher(player_id=pid, amount=vd0['amount'],
                                          sessions_total=vd0['sessions'],
                                          date_issued=date.today(),
-                                         notes='Created on re-import to hold existing check-ins')
+                                         notes='Created on re-import to hold existing check-ins',
+                                         added_by=imported_by,
+                                         added_reason='Created on re-import to hold existing check-ins')
                         db.session.add(target); db.session.flush()
                         cands.append(target)
                         recreated.append(p.name if p else str(pid))
@@ -2157,11 +2207,17 @@ def create_app():
         data     = request.get_json() or {}
         amount   = float(data.get('amount') or _voucher_defaults()['amount'])
         sessions = int(data.get('sessions_total') or _voucher_defaults()['sessions'])
+        added_by     = (data.get('added_by') or '').strip()[:80]
+        added_reason = (data.get('added_reason') or '').strip()[:200]
+        if not added_by or not added_reason:
+            return jsonify(ok=False, error='Fill in who is adding this voucher and why.')
         issued_date = date.today()
         limit_error = _voucher_limit_error(player_id, issued_date)
         if limit_error:
             return jsonify(ok=False, error=limit_error)
-        v = Voucher(player_id=player_id, amount=amount, sessions_total=sessions, date_issued=issued_date)
+        v = Voucher(player_id=player_id, amount=amount, sessions_total=sessions,
+                    date_issued=issued_date,
+                    added_by=added_by, added_reason=added_reason)
         v.continues_from = _voucher_to_continue(player_id)
         db.session.add(v)
         db.session.commit()

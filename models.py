@@ -280,6 +280,8 @@ class Voucher(db.Model):
     sessions_used_before = db.Column(db.Integer, nullable=False, default=0)   # legacy; migrated into VoucherUse rows
     date_issued    = db.Column(db.Date, nullable=False, default=date_t.today)
     notes          = db.Column(db.String(200))
+    added_by       = db.Column(db.String(80))    # who registered it (required on new ones)
+    added_reason   = db.Column(db.String(200))   # why it was added (required on new ones)
     hidden         = db.Column(db.Boolean, nullable=False, default=False)      # tidy away old vouchers
     continues_from_id = db.Column(db.Integer, db.ForeignKey('vouchers.id'))   # the voucher this one follows on from
     created_at     = db.Column(db.DateTime, default=datetime.utcnow)
