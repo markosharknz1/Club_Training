@@ -21,8 +21,8 @@ from models import (db, Setting, SessionTemplate, Group, Coach, Player,
                     DEFAULT_VOUCHER_AMOUNT, DEFAULT_VOUCHER_SESSIONS)
 
 
-APP_VERSION = '1.14.0'
-APP_RELEASED = '1 November 2026'   # bump alongside APP_VERSION at release time
+APP_VERSION = '1.15.0'
+APP_RELEASED = '20 November 2026'   # bump alongside APP_VERSION at release time
 
 # ─── Branding ───────────────────────────────────────────────────────
 # Bundled club icons (static/icons/sports/<key>.svg — see LICENSE.md there).

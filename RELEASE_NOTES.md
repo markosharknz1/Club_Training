@@ -1,21 +1,20 @@
-# Club Training v1.14.0
+# Club Training v1.15.0
 
-## Committee report, per session
+## Every voucher records who added it, and why
 
-Per-session stats change wildly, so the committee report now breaks
-everything down **per session**: a table with one row per session — times
-run, check-ins, **average per run**, different players, new players, came
-back, and that session's own retention rate — with an **"Only this"** link
-to re-run the whole report for a single session, and a Session filter next
-to the date range.
+Adding a voucher — on the Vouchers page, at check-in, or by CSV import —
+now requires **who is adding it** and **why** (the import records the
+importer and the file name). The desk's name is remembered on that machine,
+so it's typed once a night. The record shows in a new **Added by** column
+on the Vouchers page, in the edit window, and on the voucher PDF. Vouchers
+from before this update simply show a dash.
 
-The **CSV** now has one column per session in the per-player table (plus
-the period total), and a per-session summary block underneath for the
-committee.
+## Export all vouchers
 
-A new player belongs to the session their first-ever club visit was at;
-their return visits still count wherever they play — so a junior who moves
-up to the senior night still counts as retained.
+A new **Export all (CSV)** button on the Vouchers page downloads every
+voucher ever registered — hidden ones included — with player, number,
+dates, amounts, session balances, follow-on links, notes and the full
+who/why trail.
 
 ## Installing / upgrading
 
