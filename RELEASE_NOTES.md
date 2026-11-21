@@ -1,20 +1,15 @@
-# Club Training v1.15.0
+# Club Training v1.16.0
 
-## Every voucher records who added it, and why
+## No more mystery "could not start"
 
-Adding a voucher — on the Vouchers page, at check-in, or by CSV import —
-now requires **who is adding it** and **why** (the import records the
-importer and the file name). The desk's name is remembered on that machine,
-so it's typed once a night. The record shows in a new **Added by** column
-on the Vouchers page, in the edit window, and on the voucher PDF. Vouchers
-from before this update simply show a dash.
-
-## Export all vouchers
-
-A new **Export all (CSV)** button on the Vouchers page downloads every
-voucher ever registered — hidden ones included — with player, number,
-dates, amounts, session balances, follow-on links, notes and the full
-who/why trail.
+On a cold start (first run of the day, antivirus scanning the app) the
+window could open before the app's internal server was ready, showing an
+error page — and a genuine startup failure died silently. Now the app
+waits up to 30 seconds and only opens the window once the server answers;
+if something truly stops it starting (another program on its port, a
+damaged database), a clear **"Club Training could not start"** dialog says
+so, and the full detail is written to `logs\startup_error.log` in the app
+folder — send that file if it ever happens again.
 
 ## Installing / upgrading
 
