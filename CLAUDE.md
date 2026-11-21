@@ -892,6 +892,25 @@ own machine and demo to other club members (e.g. "Carol").
     max-active-vouchers limit (default 2) applies to import rows too; don't import for a
     player the test already gave 2 active vouchers.** Live-verified on seeded preview.
 
+50. **Startup hardening — the "could not start" fix** (user: "occasions where the app comes
+    up with a could not start error"; no such string existed in-app, so what they saw was
+    Edge's dead-page or silent pythonw death). Root causes: launch.py had ZERO error
+    handling (pythonw swallows exceptions invisibly) and the window opened after only a 5s
+    `_wait_for_server` — a cold club PC with Defender scanning the freshly-extracted lib\
+    can take longer, so the Edge window hit a not-yet-listening server. Fix in launch.py:
+    `_start_server(flask_app, host, port, timeout=30)` runs the server thread with an
+    exception HOLDER — a dead thread (port taken, bad config) fails IMMEDIATELY with the
+    real reason instead of timing out; **after a successful connect it sleeps 0.4s and
+    re-checks the holder, because connecting can succeed against a DIFFERENT process
+    squatting on the port while our bind just failed**. `_fail(message, exc)` writes
+    `logs\startup_error.log` (timestamp + traceback) and shows a ctypes MessageBoxW
+    ("Club Training could not start", advice + log path; suppressed by env
+    CLUB_TRAINING_NO_DIALOG for tests). Whole `__main__` wrapped so create_app crashes
+    (corrupt DB etc.) surface the same way; run_setup uses the same helper. 7-check
+    fault-injection suite (test_startup_fail.py — subprocess on a SCRATCH copy, never the
+    real DB: occupied port, corrupt badminton.db, happy path) + live dialog verified on
+    screen and ENTER-dismissed. Dev `python app.py` unchanged (console shows errors there).
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

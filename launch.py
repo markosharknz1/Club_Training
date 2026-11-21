@@ -83,21 +83,85 @@ def _close_window(proc):
             pass
 
 
+def _fail(message, exc=None):
+    """pythonw has no console, so a startup failure must be SHOWN: write the
+    full detail to logs\\startup_error.log and put a plain-English dialog on
+    screen saying what happened and where the detail is."""
+    detail = ''
+    if exc is not None:
+        import traceback
+        detail = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    log_path = os.path.join(BASE_DIR, 'logs', 'startup_error.log')
+    try:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, 'w', encoding='utf-8') as f:
+            from datetime import datetime
+            f.write(f'{datetime.now():%Y-%m-%d %H:%M:%S}\n{message}\n\n{detail}')
+    except OSError:
+        pass
+    if not os.environ.get('CLUB_TRAINING_NO_DIALOG'):   # tests set this
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                message + '\n\nTrying again usually works. If it keeps happening, '
+                'send the club the file:\n' + log_path,
+                'Club Training could not start', 0x10)
+        except Exception:
+            pass
+    sys.exit(1)
+
+
+def _start_server(flask_app, host, port, timeout=30):
+    """Run the Flask server in a daemon thread and wait until it accepts
+    connections. Cold starts on club PCs are slow (antivirus scanning a
+    freshly extracted app can take well over five seconds), so wait
+    patiently — but if the server THREAD dies (port taken, bad config),
+    fail immediately with the real reason instead of timing out."""
+    import socket as _socket
+    error = {}
+
+    def _serve():
+        try:
+            flask_app.run(host=host, port=port, debug=False, use_reloader=False)
+        except BaseException as e:          # noqa: BLE001 — must capture to report
+            error['exc'] = e
+
+    thread = threading.Thread(target=_serve, daemon=True)
+    thread.start()
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if 'exc' in error:
+            _fail('The app\'s internal server could not start '
+                  f'(address {host}, port {port}).', error['exc'])
+        try:
+            with _socket.create_connection(('127.0.0.1', port), timeout=0.3):
+                pass
+            # Something answered — but it could be another process squatting
+            # on the port while OUR bind just failed. Give that error a
+            # moment to surface before declaring victory.
+            time.sleep(0.4)
+            if 'exc' in error:
+                _fail('The app\'s internal server could not start '
+                      f'(address {host}, port {port} is already in use).',
+                      error['exc'])
+            return thread
+        except OSError:
+            time.sleep(0.2)
+    _fail(f'The app\'s internal server did not answer within {timeout} seconds. '
+          'The computer may just be very busy — close this and try again.')
+
+
 def run_setup():
     """Show the first-run setup window; on install, start the installed
     copy and close the window."""
-    from app import _free_port, _wait_for_server
+    from app import _free_port
 
     setup_flask = setup_wizard.build_setup_app(
         os.path.join(BASE_DIR, 'templates'), os.path.join(BASE_DIR, 'static'))
     state = setup_flask.setup_state
     port = _free_port()
-    threading.Thread(
-        target=lambda: setup_flask.run(host='127.0.0.1', port=port,
-                                       debug=False, use_reloader=False),
-        daemon=True,
-    ).start()
-    _wait_for_server(port)
+    _start_server(setup_flask, '127.0.0.1', port)
     url = f'http://127.0.0.1:{port}/setup'
 
     proc = None
@@ -128,20 +192,14 @@ def run_app():
                 os.path.join(BASE_DIR, '.edge-app-profile'))
             return
 
-    from app import create_app, _network_bind, _wait_for_server
+    from app import create_app, _network_bind
 
     app = create_app()
     if 'CLUB_TRAINING_PORT' in os.environ:     # CI probe: local-only, fixed
         host, port = '127.0.0.1', int(os.environ['CLUB_TRAINING_PORT'])
     else:
         host, port = _network_bind(app)
-    server_thread = threading.Thread(
-        target=lambda: app.run(host=host, port=port,
-                               debug=False, use_reloader=False),
-        daemon=True,
-    )
-    server_thread.start()
-    _wait_for_server(port)
+    server_thread = _start_server(app, host, port)
     _write_port_file(port)
     url = f'http://127.0.0.1:{port}'
 
@@ -163,13 +221,21 @@ def run_app():
 
 
 if __name__ == '__main__':
-    _strip_motw()
-    installed = setup_wizard.installed_elsewhere()
-    if installed:
-        setup_wizard.launch_installed(installed)
+    # Anything unexpected must surface as a dialog + logs\startup_error.log —
+    # under pythonw a bare exception dies in silence and the desk just sees
+    # "nothing happened".
+    try:
+        _strip_motw()
+        installed = setup_wizard.installed_elsewhere()
+        if installed:
+            setup_wizard.launch_installed(installed)
+            sys.exit(0)
+        if setup_wizard.first_run():
+            run_setup()
+            sys.exit(0)
+        run_app()
         sys.exit(0)
-    if setup_wizard.first_run():
-        run_setup()
-        sys.exit(0)
-    run_app()
-    sys.exit(0)
+    except SystemExit:
+        raise
+    except BaseException as _e:   # noqa: BLE001 — last-resort reporter
+        _fail('Club Training hit an unexpected error while starting.', _e)
