@@ -107,13 +107,14 @@
             data-guardian="{{ p.guardian_name or '' }}"
             data-phone="{{ p.guardian_phone or '' }}"
             {# single-quoted attribute: |tojson keeps raw double quotes #}
-            data-checkin='{{ {'sd_id': info.sd_id, 'group_id': info.group_id, 'payment_type': info.payment_type, 'amount': info.amount | int, 'voucher_id': info.voucher_id, 'new_member': info.new_member, 'left_injured': info.left_injured} | tojson }}'
+            data-checkin='{{ {'sd_id': info.sd_id, 'group_id': info.group_id, 'payment_type': info.payment_type, 'amount': info.amount | int, 'voucher_id': info.voucher_id, 'new_member': info.new_member, 'left_injured': info.left_injured, 'notes': info.notes} | tojson }}'
             style="cursor:pointer;user-select:none">
           <td>
             {# badges OUTSIDE .fw-semibold — the JS reads the name from it #}
             <div class="fw-semibold d-inline-block">{{ p.name }}</div>
             {% if info.new_member %}<span class="badge bg-warning text-dark ms-1" style="font-size:.6rem">NEW</span>{% endif %}
             {% if info.left_injured %}<span class="badge bg-danger ms-1" style="font-size:.6rem">left injured</span>{% endif %}
+            {% if info.notes %}<span class="badge bg-secondary ms-1" style="font-size:.6rem" title="{{ info.notes }}">note</span>{% endif %}
             {% if p.siblings %}
             <span class="badge bg-info text-dark" style="font-size:.6rem">siblings</span>
             {% endif %}
@@ -280,19 +281,10 @@
           <div id="voucher-empty" class="alert alert-danger small d-none mb-2">
             No voucher on file for this child.
           </div>
-          <div class="row g-2 mb-2">
-            <div class="col-5">
-              <input type="text" id="nv-who" class="form-control form-control-sm"
-                     placeholder="Added by (your name)" maxlength="80" autocomplete="off">
-            </div>
-            <div class="col-7">
-              <input type="text" id="nv-why" class="form-control form-control-sm"
-                     placeholder="Why (e.g. paper voucher at the desk)" maxlength="200" autocomplete="off">
-            </div>
-          </div>
-          <button type="button" class="btn btn-outline-success btn-sm" onclick="createVoucherForPlayer()">
-            + New {{ voucher_label }} ({{ DEFAULT_VOUCHER_AMOUNT | int }} / {{ DEFAULT_VOUCHER_SESSIONS }} sessions)
-          </button>
+          {# Vouchers are deliberately NOT creatable from the desk — they are
+             registered on the Vouchers page, with the who/why record. #}
+          <div class="form-text">New vouchers are registered on the
+            <a href="/vouchers" target="_blank">Vouchers page</a>, not at check-in.</div>
         </div>
 
         {# Only meaningful once checked in — a duty-of-care record #}
@@ -301,6 +293,13 @@
           <label class="form-check-label" for="modal-left-injured">
             Left injured <span class="text-muted small">(had to leave because of an injury)</span>
           </label>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold" for="modal-att-notes">Notes
+            <span class="text-muted small">(injury details, incidents — goes into the day report)</span>
+          </label>
+          <textarea id="modal-att-notes" class="form-control form-control-sm" rows="2"
+                    maxlength="500" placeholder="e.g. rolled ankle, iced, parent collected at 5:10"></textarea>
         </div>
 
         <div id="modal-error" class="alert alert-danger d-none small"></div>
@@ -398,17 +397,15 @@ let selectedPayType   = null;
 let selectedVoucherId = null;
 let currentPlayerId   = null;
 let currentVoucherList = [];
-let voucherPromptShown = false;
 let isCheckedIn        = false;
 let payTypeTouched     = false;   // the desk clicked a payment type this modal
 let squarePollTimer    = null;
 let squareCheckoutId   = null;
 
 // ── Open check-in modal ─────────────────────────────────────────────
-function openCheckin(pid, name, currentSdId, currentGroupId, currentPayType, currentAmount, currentVoucherId, currentNewMember, currentLeftInjured) {
+function openCheckin(pid, name, currentSdId, currentGroupId, currentPayType, currentAmount, currentVoucherId, currentNewMember, currentLeftInjured, currentNotes) {
   currentPlayerId = pid;
   selectedVoucherId = currentVoucherId || null;
-  voucherPromptShown = false;
   resetSquareStatus();
   isCheckedIn = currentSdId !== null;
   document.getElementById('modal-player-id').value    = pid;
@@ -420,6 +417,7 @@ function openCheckin(pid, name, currentSdId, currentGroupId, currentPayType, cur
   // "Left injured" only applies to someone already checked in
   document.getElementById('left-injured-row').classList.toggle('d-none', !isCheckedIn);
   document.getElementById('modal-left-injured').checked = isCheckedIn ? !!currentLeftInjured : false;
+  document.getElementById('modal-att-notes').value = (isCheckedIn && currentNotes) ? currentNotes : '';
 
   // Pre-select session (auto-select if only one)
   selectedSdId = currentSdId;
@@ -567,10 +565,9 @@ function loadVoucherOptions(playerId, preselectId) {
 
       if (data.vouchers.length === 0) {
         sel.innerHTML = '<option value="">No vouchers on file</option>';
-        emptyMsg.textContent = 'No voucher on file for this child.';
+        emptyMsg.textContent = `No ${VOUCHER_LABEL} on file for this child — register one on the Vouchers page.`;
         emptyMsg.classList.remove('d-none');
         selectedVoucherId = null;
-        promptCreateVoucher(`This child has no ${VOUCHER_LABEL} on file.`);
         return;
       }
 
@@ -593,9 +590,8 @@ function loadVoucherOptions(playerId, preselectId) {
       selectedVoucherId = chosen;
 
       if (allUsedUp) {
-        emptyMsg.textContent = `This child's ${VOUCHER_LABEL} is fully used (10/10).`;
+        emptyMsg.textContent = `This child's ${VOUCHER_LABEL} is fully used — register a new one on the Vouchers page.`;
         emptyMsg.classList.remove('d-none');
-        promptCreateVoucher(`This child's ${VOUCHER_LABEL} is fully used (10/10).`);
       } else {
         updateVoucherWarning(data.vouchers.find(v => v.id === chosen));
       }
@@ -622,44 +618,6 @@ function updateVoucherWarning(voucher) {
   } else {
     warnMsg.classList.add('d-none');
   }
-}
-
-function promptCreateVoucher(reason) {
-  if (voucherPromptShown) return;
-  voucherPromptShown = true;
-  setTimeout(() => {
-    if (confirm(reason + ' Create a new voucher now so check-in can continue?')) {
-      createVoucherForPlayer();
-    }
-  }, 50);
-}
-
-function createVoucherForPlayer() {
-  if (!currentPlayerId) return;
-  const who = document.getElementById('nv-who');
-  const why = document.getElementById('nv-why');
-  if (!who.value.trim() && localStorage) {
-    try { who.value = localStorage.getItem('ct-added-by') || ''; } catch (e) {}
-  }
-  if (!who.value.trim() || !why.value.trim()) {
-    showError('Fill in who is adding this voucher and why — every voucher records that.');
-    (who.value.trim() ? why : who).focus();
-    return;
-  }
-  try { localStorage.setItem('ct-added-by', who.value.trim()); } catch (e) {}
-  fetch(`/api/player/${currentPlayerId}/vouchers`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({added_by: who.value.trim(), added_reason: why.value.trim()}),
-  }).then(r => r.json()).then(data => {
-    if (!data.ok) {
-      showError(data.error);
-      return;
-    }
-    voucherPromptShown = false;
-    why.value = '';
-    loadVoucherOptions(currentPlayerId, data.voucher.id);
-  });
 }
 
 // ── Square Terminal charge ───────────────────────────────────────────
@@ -753,16 +711,17 @@ function confirmCheckin() {
   const voucherId = selectedPayType === 'Sports Voucher' ? selectedVoucherId : null;
   const newMember = document.getElementById('modal-new-member').checked;
   const leftInjured = isCheckedIn && document.getElementById('modal-left-injured').checked;
+  const attNotes  = document.getElementById('modal-att-notes').value.trim();
   const prevSdId  = parseInt(document.getElementById('modal-current-sd-id').value) || null;
 
   const doCheckin = () => fetch('/register/' + selectedSdId + '/checkin', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({player_id: playerId, payment_type: selectedPayType, amount, group_id: groupId, voucher_id: voucherId, new_member: newMember, left_injured: leftInjured}),
+    body: JSON.stringify({player_id: playerId, payment_type: selectedPayType, amount, group_id: groupId, voucher_id: voucherId, new_member: newMember, left_injured: leftInjured, notes: attNotes}),
   }).then(r => r.json()).then(data => {
     if (!data.ok) { showError(data.error); return; }
     bootstrap.Modal.getInstance(document.getElementById('checkinModal')).hide();
-    moveToCheckedIn(playerId, selectedSdId, groupId, selectedPayType, amount, voucherId, newMember, leftInjured);
+    moveToCheckedIn(playerId, selectedSdId, groupId, selectedPayType, amount, voucherId, newMember, leftInjured, attNotes);
     updateSessionBadges(data.totals, selectedSdId);
   });
 
@@ -864,7 +823,7 @@ function addPlayerRow(player) {
 }
 
 // ── Move players between Waiting / Checked In tables ─────────────────
-function moveToCheckedIn(pid, sdId, groupId, payType, amount, voucherId, newMember, leftInjured) {
+function moveToCheckedIn(pid, sdId, groupId, payType, amount, voucherId, newMember, leftInjured, attNotes) {
   const row = document.querySelector(`tr[data-player-id="${pid}"]`);
   if (!row) return;
   const name        = row.querySelector('.fw-semibold').textContent.trim();
@@ -889,15 +848,17 @@ function moveToCheckedIn(pid, sdId, groupId, payType, amount, voucherId, newMemb
   tr.dataset.phone       = phone;
   tr.dataset.lastSession = lastSession;
   tr.dataset.lastGroup   = lastGroup;
-  tr.dataset.checkin     = JSON.stringify({sd_id: sdId, group_id: groupId ? parseInt(groupId) : null, payment_type: payType, amount: Math.round(amount), voucher_id: voucherId || null, new_member: !!newMember, left_injured: !!leftInjured});
+  tr.dataset.checkin     = JSON.stringify({sd_id: sdId, group_id: groupId ? parseInt(groupId) : null, payment_type: payType, amount: Math.round(amount), voucher_id: voucherId || null, new_member: !!newMember, left_injured: !!leftInjured, notes: attNotes || ''});
   tr.style.cssText       = 'cursor:pointer;user-select:none';
   const newBadge = newMember ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:.6rem">NEW</span>' : '';
   const injuredBadge = leftInjured ? ' <span class="badge bg-danger ms-1" style="font-size:.6rem">left injured</span>' : '';
+  const noteBadge = attNotes ? ' <span class="badge bg-secondary ms-1" style="font-size:.6rem">note</span>' : '';
   // badges OUTSIDE .fw-semibold — the name is read back from it
-  tr.innerHTML = `<td><div class="fw-semibold d-inline-block"></div>${newBadge}${injuredBadge}</td>
+  tr.innerHTML = `<td><div class="fw-semibold d-inline-block"></div>${newBadge}${injuredBadge}${noteBadge}</td>
     <td>${sess ? sess.name : ''}</td>`
     + (GROUPS_ENABLED ? `<td class="text-muted">${grp ? grp.name : ''}</td>` : '');
   tr.querySelector('.fw-semibold').textContent = name;
+  if (attNotes) tr.querySelector('.badge.bg-secondary').title = attNotes;
 
   insertCheckedInRow(tr);
   refreshEmptyStates();
@@ -1020,7 +981,8 @@ document.addEventListener('dblclick', function(e) {
     ci ? ci.amount      : 0,
     ci ? ci.voucher_id  : null,
     ci ? ci.new_member  : null,
-    ci ? ci.left_injured: false);
+    ci ? ci.left_injured: false,
+    ci ? ci.notes       : '');
 });
 
 document.addEventListener('contextmenu', function(e) {

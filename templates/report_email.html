@@ -35,7 +35,8 @@
       <div style="font-size:13px;color:#374151;line-height:1.7">
         <b>Coaches:</b> {{ s.coaches | join(', ') if s.coaches else '—' }}<br>
         {% if s.new_players %}<b>New players:</b> {{ s.new_players | join(', ') }}<br>{% endif %}
-        {% if s.injured %}<b style="color:#b91c1c">Left injured:</b> {{ s.injured | join(', ') }}<br>{% endif %}
+        {% if s.injured %}<b style="color:#b91c1c">Left injured:</b> {{ s.injured | join('; ') }}<br>{% endif %}
+        {% if s.player_notes %}<b>Player notes:</b> {{ s.player_notes | join('; ') }}<br>{% endif %}
         {% if s.notes %}<b>Notes:</b> {{ s.notes }}<br>{% endif %}
       </div>
     </div>

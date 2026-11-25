@@ -12,6 +12,8 @@
     </div>
   </div>
   <div class="d-flex gap-2">
+    <a href="/reports/day.pdf?date={{ sd.date.isoformat() }}"
+       class="btn btn-outline-secondary btn-sm">↓ Day report (PDF)</a>
     <form method="post" action="/register/{{ sd.id }}/reopen" class="d-inline">
       <button class="btn btn-outline-warning btn-sm">Reopen</button>
     </form>
@@ -162,6 +164,7 @@
         <tr>
           <td>
             <a href="/players/{{ a.player.id }}" class="text-decoration-none">{{ a.player.name }}</a>
+            {% if a.notes %}<div class="text-muted" style="font-size:.72rem">📝 {{ a.notes }}</div>{% endif %}
           </td>
           <td class="text-muted small">{{ a.group.name if a.group else '—' }}</td>
           <td>
@@ -180,7 +183,8 @@
                     title="Change this player's record"
                     onclick='openPayEdit({{ a.id }}, {{ a.player.id }}, {{ a.player.name|tojson }},
                              {{ a.payment_type|tojson }}, {{ a.amount|float }},
-                             {{ "true" if a.left_injured else "false" }})'>
+                             {{ "true" if a.left_injured else "false" }},
+                             {{ (a.notes or "")|tojson }})'>
               ✎
             </button>
           </td>
@@ -222,6 +226,12 @@
             Left injured <span class="text-muted small">(had to leave because of an injury)</span>
           </label>
         </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold" for="pe-notes">Notes
+            <span class="text-muted small">(injury details — goes into the day report)</span>
+          </label>
+          <textarea id="pe-notes" class="form-control form-control-sm" rows="2" maxlength="500"></textarea>
+        </div>
         <div id="pe-error" class="alert alert-danger d-none"></div>
       </div>
       <div class="modal-footer d-flex justify-content-between">
@@ -248,11 +258,12 @@ const PE_PRICES = { 'Cash': {{ sd.template.price_cash|float }}, 'Card': {{ sd.te
 let peAttId = null, peType = null, peOriginalType = null, peOriginalAmount = 0;
 let peVoucher = { playerId: null, pending: false, loaded: false, totalLeft: 0, pickLabel: '' };
 
-function openPayEdit(attId, playerId, name, currentType, currentAmount, leftInjured) {
+function openPayEdit(attId, playerId, name, currentType, currentAmount, leftInjured, attNotes) {
   peAttId = attId; peOriginalType = currentType; peOriginalAmount = currentAmount;
   document.getElementById('pe-name').textContent = name;
   document.getElementById('pe-error').classList.add('d-none');
   document.getElementById('pe-left-injured').checked = !!leftInjured;
+  document.getElementById('pe-notes').value = attNotes || '';
   loadPeVouchers(playerId);
   peSelect(currentType, currentAmount);
   bootstrap.Modal.getOrCreateInstance(document.getElementById('payEditModal')).show();
@@ -348,6 +359,7 @@ function peSave() {
       payment_type: peType,
       amount: parseFloat(document.getElementById('pe-amount').value) || 0,
       left_injured: document.getElementById('pe-left-injured').checked,
+      notes: document.getElementById('pe-notes').value,
     }),
   })
   .then(r => r.json())

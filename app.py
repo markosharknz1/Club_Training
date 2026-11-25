@@ -1213,6 +1213,7 @@ def create_app():
                     'voucher_id':   a.voucher_id,
                     'new_member':   bool(a.new_member),
                     'left_injured': bool(a.left_injured),
+                    'notes':        a.notes or '',
                 }
 
         # Players who attended within the last 3 months → prioritised in the waiting list
@@ -1405,6 +1406,7 @@ def create_app():
         voucher_id   = _int(data.get('voucher_id'))
         new_member   = bool(data.get('new_member'))
         left_injured = bool(data.get('left_injured'))
+        att_notes    = (data.get('notes') or '').strip()[:500] or None
 
         rec = Attendance.query.filter_by(session_date_id=sd_id, player_id=player_id).first()
 
@@ -1422,12 +1424,13 @@ def create_app():
             rec.voucher_id   = voucher_id
             rec.new_member   = new_member
             rec.left_injured = left_injured
+            rec.notes        = att_notes
         else:
             db.session.add(Attendance(
                 session_date_id=sd_id, player_id=player_id,
                 group_id=group_id, payment_type=payment_type, amount=amount,
                 voucher_id=voucher_id, new_member=new_member,
-                left_injured=left_injured,
+                left_injured=left_injured, notes=att_notes,
             ))
         db.session.commit()
         db.session.refresh(sd)
@@ -1476,6 +1479,8 @@ def create_app():
         rec.voucher_id   = voucher_id
         if 'left_injured' in data:
             rec.left_injured = bool(data['left_injured'])
+        if 'notes' in data:
+            rec.notes = (data.get('notes') or '').strip()[:500] or None
         db.session.commit()
         db.session.refresh(sd)
         return jsonify({'ok': True, 'totals': _totals(sd)})
@@ -2201,33 +2206,9 @@ def create_app():
             'sessions_remaining': v.sessions_remaining,
         } for v in vs])
 
-    @app.route('/api/player/<int:player_id>/vouchers', methods=['POST'])
-    def api_player_voucher_create(player_id):
-        Player.query.get_or_404(player_id)
-        data     = request.get_json() or {}
-        amount   = float(data.get('amount') or _voucher_defaults()['amount'])
-        sessions = int(data.get('sessions_total') or _voucher_defaults()['sessions'])
-        added_by     = (data.get('added_by') or '').strip()[:80]
-        added_reason = (data.get('added_reason') or '').strip()[:200]
-        if not added_by or not added_reason:
-            return jsonify(ok=False, error='Fill in who is adding this voucher and why.')
-        issued_date = date.today()
-        limit_error = _voucher_limit_error(player_id, issued_date)
-        if limit_error:
-            return jsonify(ok=False, error=limit_error)
-        v = Voucher(player_id=player_id, amount=amount, sessions_total=sessions,
-                    date_issued=issued_date,
-                    added_by=added_by, added_reason=added_reason)
-        v.continues_from = _voucher_to_continue(player_id)
-        db.session.add(v)
-        db.session.commit()
-        return jsonify(ok=True, voucher={
-            'id':                 v.id,
-            'label':              f"{v.date_issued.strftime('%d %b %Y')} — 0/{v.sessions_total} used, {v.sessions_remaining} left",
-            'sessions_total':     v.sessions_total,
-            'sessions_used':      0,
-            'sessions_remaining': v.sessions_remaining,
-        })
+    # NOTE: there is deliberately no POST here any more — vouchers can only
+    # be created on the Vouchers page (with the who/why record), never from
+    # the check-in desk.
 
     # ── Coaches ──────────────────────────────────────────────────────
 
@@ -2531,6 +2512,77 @@ def create_app():
         if start > end:
             return None, None, 'The From date must be before the To date.'
         return start, end, None
+
+    @app.route('/reports/day.pdf')
+    def reports_day_pdf():
+        """The end-of-day report as a PDF — same content as the emailed day
+        report (payments, coaches, new players, injuries with their notes),
+        for printing or filing."""
+        import io
+        from flask import send_file
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                        Paragraph, Spacer)
+        try:
+            d = date.fromisoformat(request.args.get('date', ''))
+        except ValueError:
+            flash('Pick a valid date for the day report.', 'danger')
+            return redirect(url_for('history'))
+        data = _report_day_data(d)
+        if not data:
+            flash(f'No sessions on {d.strftime("%d %b %Y")} — nothing to report.', 'warning')
+            return redirect(url_for('history'))
+
+        club = Setting.get('club_name', 'Club Training')
+        styles = getSampleStyleSheet()
+        dark = colors.HexColor('#1a3a5c')
+        elements = [Paragraph(club, styles['Title']),
+                    Paragraph(f'Day report — {data["title"]}', styles['Heading2']),
+                    Spacer(1, 6 * mm)]
+        for s in data['sessions']:
+            elements.append(Paragraph(
+                f'{s["name"]} ({s["time"]})'
+                + (' — still open' if s['status'] == 'open' else ''),
+                styles['Heading3']))
+            rows = [['Players checked in', str(s['players'])]]
+            rows += [[pt, str(cnt)] for pt, cnt in s['breakdown']]
+            rows.append([f'Cash ${s["cash"]:.0f} · Card ${s["card"]:.0f}',
+                         f'${s["cash"] + s["card"]:.0f}'])
+            t = Table(rows, colWidths=[110 * mm, 40 * mm])
+            t.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#eef2f6')),
+                ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#eef2f6')),
+                ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+                ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+            ]))
+            elements.append(t)
+            info = [('Coaches', ', '.join(s['coaches']) or '—')]
+            if s['new_players']:
+                info.append(('New players', ', '.join(s['new_players'])))
+            if s['injured']:
+                info.append(('Left injured', '; '.join(s['injured'])))
+            if s['player_notes']:
+                info.append(('Player notes', '; '.join(s['player_notes'])))
+            if s['notes']:
+                info.append(('Session notes', s['notes']))
+            for label, text in info:
+                elements.append(Paragraph(f'<b>{label}:</b> {text}', styles['Normal']))
+            elements.append(Spacer(1, 6 * mm))
+        if len(data['sessions']) > 1:
+            elements.append(Paragraph(
+                f'<b>Day total:</b> {data["total_players"]} check-ins · '
+                f'Cash ${data["total_cash"]:.0f} · Card ${data["total_card"]:.0f}',
+                styles['Normal']))
+        buf = io.BytesIO()
+        SimpleDocTemplate(buf, pagesize=A4, topMargin=18 * mm,
+                          bottomMargin=18 * mm).build(elements)
+        buf.seek(0)
+        return send_file(buf, mimetype='application/pdf', as_attachment=True,
+                         download_name=f'day_report_{d.isoformat()}.pdf')
 
     @app.route('/reports/committee')
     def reports_committee():
@@ -3872,7 +3924,7 @@ def _add_voucher_uses(voucher, count, dates, note='Imported balance'):
 def _report_session_data(sd):
     """Everything the report shows about one session occurrence."""
     counts, cash, card = OrderedDict(), 0.0, 0.0
-    new_players, injured = [], []
+    new_players, injured, player_notes = [], [], []
     for a in sorted(sd.attendance, key=lambda a: a.player.name.lower()):
         counts[a.payment_type] = counts.get(a.payment_type, 0) + 1
         if a.payment_type == 'Cash':
@@ -3882,7 +3934,10 @@ def _report_session_data(sd):
         if a.new_member:
             new_players.append(a.player.name)
         if a.left_injured:
-            injured.append(a.player.name)
+            injured.append(a.player.name
+                           + (f' — {a.notes}' if a.notes else ''))
+        elif a.notes:
+            player_notes.append(f'{a.player.name} — {a.notes}')
     breakdown = [(pt, counts[pt]) for pt in PAYMENT_TYPES if pt in counts]
     return {
         'name': sd.template.name,
@@ -3893,6 +3948,7 @@ def _report_session_data(sd):
         'cash': cash, 'card': card,
         'new_players': new_players,
         'injured': injured,
+        'player_notes': player_notes,
         # CoachAttendance is how coaches are marked present (the register's
         # tickboxes) — sd.coaches is a separate legacy relation.
         'coaches': sorted(ca.coach.name for ca in sd.coach_attendance),
@@ -4069,7 +4125,9 @@ def _report_text(data, club):
             if s['new_players']:
                 lines.append('  New players: ' + ', '.join(s['new_players']))
             if s['injured']:
-                lines.append('  Left injured: ' + ', '.join(s['injured']))
+                lines.append('  Left injured: ' + '; '.join(s['injured']))
+            if s['player_notes']:
+                lines.append('  Player notes: ' + '; '.join(s['player_notes']))
             if s['notes']:
                 lines.append('  Notes: ' + s['notes'])
             lines.append('')

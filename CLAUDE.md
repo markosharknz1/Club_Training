@@ -911,6 +911,28 @@ own machine and demo to other club members (e.g. "Carol").
     real DB: occupied port, corrupt badminton.db, happy path) + live dialog verified on
     screen and ENTER-dismissed. Dev `python app.py` unchanged (console shows errors there).
 
+51. **v1.17.0 batch — no voucher creation at check-in, session move confirmed, injury
+    notes → day-report PDF** (three user asks). (a) Voucher quick-create REMOVED entirely
+    from the day check-in modal (nv-who/nv-why inputs, "+ New" button, promptCreateVoucher/
+    createVoucherForPlayer JS all gone; empty/fully-used messages now point at the Vouchers
+    page) AND the POST /api/player/<id>/vouchers route is deleted (405) — the GET stays
+    (voucher dropdown + balance displays need it); vouchers are created ONLY on the
+    Vouchers page with the who/why record. (b) Session move needed NO new code — the day
+    modal's session buttons + confirm already undo-the-old/check-into-the-new; live-
+    verified (record moves, exactly one row, note + injured flag carried). Tell the user:
+    double-click the player → tap the other session → Confirm. (c) `Attendance.notes`
+    (column existed since the beginning, never written) now set from all three surfaces
+    (day modal + register modal textareas shown when checked in, pe-modal on closed
+    sessions; 500-char cap; day modal carries it via data-checkin/'notes'); grey "note"
+    badge w/ title tooltip on checked rows, note line under the player on detail.html.
+    Reports: _report_session_data injured entries become "Name — note", non-injured notes
+    collect into new `player_notes`; email/text templates updated. NEW
+    `/reports/day.pdf?date=` (reportlab platypus, same data as the emailed day report incl.
+    injury notes) — buttons on register/detail header and History's report card (**in BOTH
+    email-configured and unconfigured branches** — first cut hid it behind email_ready and
+    a test caught it). Suites: test_checkin_v117.py (16) + test_voucher_audit.py updated
+    (quick-create checks → 405/absence). Sample PDF sent to the user.
+
 ## Known open items (not yet built — need user input before building)
 
 - **"Enter date" for voucher usage** — the user flagged wanting some way to manually

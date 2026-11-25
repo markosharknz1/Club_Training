@@ -77,13 +77,31 @@
       <div class="col-auto">
         <button class="btn btn-primary btn-sm">Send report</button>
       </div>
-      <div class="form-text mt-1 mb-0">Payments, coaches, new players and any injuries —
-        a readable summary for the committee. Addresses are remembered for next time.</div>
+      <div class="col-auto">
+        <button type="button" class="btn btn-outline-secondary btn-sm"
+                onclick="location = '/reports/day.pdf?date=' + this.form.report_date.value">
+          ↓ Day PDF</button>
+      </div>
+      <div class="form-text mt-1 mb-0">Payments, coaches, new players and any injuries with
+        their notes — a readable summary for the committee. Addresses are remembered for
+        next time.</div>
     </form>
     {% else %}
-    <p class="text-muted small mb-0">Set up an email provider first under
-      <a href="/settings/email">Setup → Club Settings → Email</a>, then day and month
-      summary reports can be emailed from here.</p>
+    <form class="row g-2 align-items-end" onsubmit="return false">
+      <div class="col-auto">
+        <label class="form-label small fw-semibold mb-1">Day</label>
+        <input type="date" name="report_date" class="form-control form-control-sm"
+               value="{{ today.isoformat() }}">
+      </div>
+      <div class="col-auto">
+        <button type="button" class="btn btn-outline-secondary btn-sm"
+                onclick="location = '/reports/day.pdf?date=' + this.form.report_date.value">
+          ↓ Day PDF</button>
+      </div>
+      <div class="form-text mt-1 mb-0">Day report as a PDF — payments, coaches, new players
+        and injury notes. To <em>email</em> reports, set up a provider under
+        <a href="/settings/email">Setup → Club Settings → Email</a>.</div>
+    </form>
     {% endif %}
   </div>
 </div>
