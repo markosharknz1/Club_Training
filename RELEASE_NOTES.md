@@ -1,15 +1,32 @@
-# Club Training v1.16.0
+# Club Training v1.17.0
 
-## No more mystery "could not start"
+## Vouchers are now created in one place only
 
-On a cold start (first run of the day, antivirus scanning the app) the
-window could open before the app's internal server was ready, showing an
-error page — and a genuine startup failure died silently. Now the app
-waits up to 30 seconds and only opens the window once the server answers;
-if something truly stops it starting (another program on its port, a
-damaged database), a clear **"Club Training could not start"** dialog says
-so, and the full detail is written to `logs\startup_error.log` in the app
-folder — send that file if it ever happens again.
+The "+ New voucher" button is gone from the check-in window, along with
+the behind-the-scenes shortcut it used. New vouchers are registered on the
+**Vouchers** page only, where the who-added-it and why record is always
+filled in. If a player has no usable voucher at check-in, the window now
+says so and points you there.
+
+## Notes on a player — injuries and incidents
+
+Every check-in now has a **Notes** box (in the day check-in window, the
+register, and when editing a closed session). Use it for injury details or
+anything the committee should see: notes show as a small badge on the
+player's row, appear on the session summary, and flow into the emailed
+day/month reports — an injured player's note travels with the
+"Left injured" line.
+
+## Day report as a PDF
+
+A **↓ Day PDF** button on the History page and on each session's summary
+downloads the full day report — payments per session, coaches, new
+players, injuries with their notes — as a PDF you can file or print. It
+works even before email is set up.
+
+Moving a player between sessions on the same day already works: double-click
+the player, tap the other session's button, Confirm — payment, flags and
+notes move with them.
 
 ## Installing / upgrading
 
